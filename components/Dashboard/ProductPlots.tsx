@@ -38,7 +38,7 @@ const ProductPlots: React.FC<ProductPlotsProps> = ({ products, yearFilter }) => 
         monthlyAggregates[monthKey] = { etv: 0, teilwert: 0, dateObj: new Date(year, month, 1) };
       }
       monthlyAggregates[monthKey].etv += p.etv;
-      monthlyAggregates[monthKey].teilwert += (p.myTeilwert ?? p.teilwert);
+      monthlyAggregates[monthKey].teilwert += (p.myTeilwert ?? p.teilwert ?? 0); // <--- MODIFIED HERE
     });
 
     const dataForChart: { month: string, cumulativeEtv: number, cumulativeTeilwert: number }[] = [];

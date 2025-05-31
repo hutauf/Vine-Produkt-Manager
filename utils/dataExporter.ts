@@ -1,3 +1,4 @@
+
 import { Product } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -26,7 +27,10 @@ export const exportToXlsx = (data: Product[], filename: string) => {
     PDF_Link: p.pdf,
     Verkaufspreis: p.salePrice,
     Verkaufsdatum: p.saleDate, // TT.MM.JJJJ
-    Kaeufer_Adresse: p.buyerAddress, // New field
+    Kaeufer_Adresse: p.buyerAddress,
+    Privatentnahme_Datum: p.privatentnahmeDate, // TT.MM.JJJJ - Added
+    Festgeschrieben: p.festgeschrieben === 1 ? 'Ja' : 'Nein', // New field
+    Rechnungsnummer: p.rechnungsNummer, // New field
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(worksheetData);

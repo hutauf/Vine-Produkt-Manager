@@ -19,10 +19,8 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
               return;
             }
             const normalizedOrderDate = normalizeDateString(productData.date, `order date for ASIN ${productData.ASIN} from array item ${index}`, productData.ASIN);
-            // Assuming saleDate from file, if present, is TT.MM.JJJJ or needs separate normalization if it could be ISO
-            // const normalizedSaleDate = productData.saleDate ? normalizeDateString(productData.saleDate, `sale date for ASIN ${productData.ASIN}`, productData.ASIN) : undefined;
-
-
+            const parsedTeilwert = parseFloat(productData.teilwert);
+            
             products.push({
               ASIN: productData.ASIN,
               name: productData.name || 'N/A',
@@ -30,7 +28,7 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
               date: normalizedOrderDate,
               etv: parseFloat(productData.etv) || 0,
               keepa: productData.keepa != null ? parseFloat(productData.keepa) : null,
-              teilwert: parseFloat(productData.teilwert) || 0,
+              teilwert: !isNaN(parsedTeilwert) ? parsedTeilwert : null, // <--- MODIFIED HERE
               pdf: productData.pdf,
               myTeilwert: productData.myTeilwert != null ? parseFloat(productData.myTeilwert) : null,
               myTeilwertReason: productData.myTeilwertReason || '',
@@ -38,7 +36,10 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
               salePrice: productData.salePrice != null ? parseFloat(productData.salePrice) : null,
               saleDate: productData.saleDate || undefined,
               buyerAddress: productData.buyerAddress || undefined,
+              privatentnahmeDate: productData.privatentnahmeDate || undefined, 
               last_update_time: typeof productData.last_update_time === 'number' ? productData.last_update_time : undefined,
+              festgeschrieben: productData.festgeschrieben === 1 ? 1 : undefined, // New field
+              rechnungsNummer: productData.rechnungsNummer || undefined, // New field
             });
           });
         } else if (typeof jsonData === 'object' && jsonData !== null) {
@@ -51,7 +52,7 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
                 try {
                     const productData = JSON.parse(productString);
                     const normalizedOrderDate = normalizeDateString(productData.date, `order date for ASIN ${asin} from stringified JSON`, asin);
-                    // const normalizedSaleDate = productData.saleDate ? normalizeDateString(productData.saleDate, `sale date for ASIN ${asin}`, asin) : undefined;
+                    const parsedTeilwert = parseFloat(productData.teilwert);
 
                     products.push({
                         ASIN: asin,
@@ -60,7 +61,7 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
                         date: normalizedOrderDate,
                         etv: parseFloat(productData.etv) || 0,
                         keepa: productData.keepa != null ? parseFloat(productData.keepa) : null,
-                        teilwert: parseFloat(productData.teilwert) || 0,
+                        teilwert: !isNaN(parsedTeilwert) ? parsedTeilwert : null, // <--- MODIFIED HERE
                         pdf: productData.pdf,
                         myTeilwert: productData.myTeilwert != null ? parseFloat(productData.myTeilwert) : null,
                         myTeilwertReason: productData.myTeilwertReason || '',
@@ -68,9 +69,10 @@ export const parseProductsFromFile = (file: File): Promise<Product[]> => {
                         salePrice: productData.salePrice != null ? parseFloat(productData.salePrice) : null,
                         saleDate: productData.saleDate || undefined,
                         buyerAddress: productData.buyerAddress || undefined,
-                        // last_update_time is not typically in the stringified JSON of the old format
-                        // If it were, it would be: productData.last_update_time
+                        privatentnahmeDate: productData.privatentnahmeDate || undefined, 
                         last_update_time: typeof productData.last_update_time === 'number' ? productData.last_update_time : undefined,
+                        festgeschrieben: productData.festgeschrieben === 1 ? 1 : undefined, // New field
+                        rechnungsNummer: productData.rechnungsNummer || undefined, // New field
                     });
                 } catch (e) {
                     console.warn(`Failed to parse stringified JSON for key ${key}: ${(e as Error).message}. Skipping this entry.`);

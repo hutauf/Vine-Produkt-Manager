@@ -1,14 +1,14 @@
 
 import React from 'react';
 import { TAB_OPTIONS } from '../../constants';
-import { FaFileExport, FaFileExcel, FaCog, FaSyncAlt } from 'react-icons/fa';
+import { FaFileExport, FaFileExcel, FaCog, FaSyncAlt, FaReceipt, FaThLarge, FaCalculator, FaArchive, FaDollarSign } from 'react-icons/fa'; 
 
 interface NavbarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   onExportJson: () => void;
   onExportXlsx: () => void;
-  onFullSync: () => void; // New prop for Full Sync
+  onFullSync: () => void; 
 }
 
 const Navbar: React.FC<NavbarProps> = ({
@@ -16,13 +16,14 @@ const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   onExportJson,
   onExportXlsx,
-  onFullSync // Destructure new prop
+  onFullSync 
 }) => {
   const navTabs = [
-    { key: TAB_OPTIONS.DASHBOARD, label: TAB_OPTIONS.DASHBOARD, icon: null },
-    { key: TAB_OPTIONS.EUER, label: TAB_OPTIONS.EUER, icon: null },
-    { key: TAB_OPTIONS.LAGER, label: TAB_OPTIONS.LAGER, icon: null },
-    { key: TAB_OPTIONS.VERKAUFE, label: TAB_OPTIONS.VERKAUFE, icon: null },
+    { key: TAB_OPTIONS.DASHBOARD, label: TAB_OPTIONS.DASHBOARD, icon: <FaThLarge className="mr-1.5 h-4 w-4" /> },
+    { key: TAB_OPTIONS.EUER, label: TAB_OPTIONS.EUER, icon: <FaCalculator className="mr-1.5 h-4 w-4" /> },
+    { key: TAB_OPTIONS.VERMOEGEN, label: TAB_OPTIONS.VERMOEGEN, icon: <FaArchive className="mr-1.5 h-4 w-4" /> }, // Changed from LAGER
+    { key: TAB_OPTIONS.VERKAUFE, label: TAB_OPTIONS.VERKAUFE, icon: <FaDollarSign className="mr-1.5 h-4 w-4" /> },
+    { key: TAB_OPTIONS.BELEGE, label: TAB_OPTIONS.BELEGE, icon: <FaReceipt className="mr-1.5 h-4 w-4" /> },
     { key: TAB_OPTIONS.SETTINGS, label: TAB_OPTIONS.SETTINGS, icon: <FaCog className="mr-1.5 h-4 w-4" /> },
   ];
 
@@ -54,7 +55,7 @@ const Navbar: React.FC<NavbarProps> = ({
           </div>
           <div className="flex items-center">
              <button
-                onClick={onFullSync} // Call onFullSync
+                onClick={onFullSync} 
                 title="Vollständige Synchronisation mit Server"
                 aria-label="Vollständige Synchronisation mit Server"
                 className="p-2 rounded-md text-gray-300 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-white mr-2"
@@ -77,7 +78,6 @@ const Navbar: React.FC<NavbarProps> = ({
               >
                 <FaFileExcel size={20} />
               </button>
-            {/* User display and logout button removed */}
           </div>
         </div>
         <div className="md:hidden py-2">

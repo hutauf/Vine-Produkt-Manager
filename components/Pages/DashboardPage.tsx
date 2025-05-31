@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Product, ProductUsage } from '../../types';
+import { Product, ProductUsage, EuerSettings, BelegSettings } from '../../types';
 import ProductTable from '../Products/ProductTable';
 import FileUpload from '../Products/FileUpload';
 import ProductPlots from '../Dashboard/ProductPlots';
@@ -9,14 +9,24 @@ import { parseDMYtoDate } from '../../utils/dateUtils';
 
 interface DashboardPageProps {
   products: Product[];
-  onUpdateProduct: (product: Product) => void;
+  onUpdateProduct: (product: Product) => Promise<void>;
+  onSaveAndFinalizeProduct: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New prop
   onFileUpload: (file: File) => Promise<void>;
+  euerSettings: EuerSettings;
+  belegSettings: BelegSettings; // New prop
 }
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct, onFileUpload }) => {
+const DashboardPage: React.FC<DashboardPageProps> = ({ 
+    products, 
+    onUpdateProduct, 
+    onSaveAndFinalizeProduct,
+    onFileUpload, 
+    euerSettings,
+    belegSettings 
+}) => {
   const [yearFilter, setYearFilter] = useState<string>('all');
-  const [hideEtvZero, setHideEtvZero] = useState<boolean>(false);
   const [hideCancelled, setHideCancelled] = useState<boolean>(false);
+  const [hideFinalized, setHideFinalized] = useState<boolean>(true); // New filter, default true
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [isLoadingUpload, setIsLoadingUpload] = useState<boolean>(false);
 
@@ -47,7 +57,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    let tempProducts = products;
+    let tempProducts = products; 
 
     if (globalSearchTerm) {
       const lowerSearchTerm = globalSearchTerm.toLowerCase();
@@ -77,11 +87,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct
           return false;
         }
       }
-      if (hideEtvZero && p.etv === 0) return false;
       if (hideCancelled && p.usageStatus.includes(ProductUsage.STORNIERT)) return false;
+      if (hideFinalized && p.festgeschrieben === 1) return false; // New filter condition
       return true;
     });
-  }, [products, yearFilter, hideEtvZero, hideCancelled, globalSearchTerm]);
+  }, [products, yearFilter, hideCancelled, hideFinalized, globalSearchTerm, euerSettings.ignoreETVZeroProducts]);
   
   const handleFileUploadInternal = async (file: File) => {
     setIsLoadingUpload(true);
@@ -99,7 +109,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct
             <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center">
                 <FaFilter className="mr-2 text-sky-400" /> Filteroptionen
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"> {/* Changed to sm:grid-cols-3 */}
                 <div>
                     <label htmlFor="yearFilter" className="block text-sm font-medium text-gray-300">Jahr</label>
                     <select
@@ -112,28 +122,31 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct
                     </select>
                 </div>
                 <div className="flex items-end">
-                    <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer p-2 bg-slate-700 rounded-md hover:bg-slate-600 w-full">
-                        <input
-                            type="checkbox"
-                            checked={hideEtvZero}
-                            onChange={(e) => setHideEtvZero(e.target.checked)}
-                            className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
-                        />
-                        <span>ETV=0 ausblenden</span>
-                    </label>
-                </div>
-                <div className="flex items-end">
-                     <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer p-2 bg-slate-700 rounded-md hover:bg-slate-600 w-full">
+                     <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer p-2 bg-slate-700 rounded-md hover:bg-slate-600 w-full h-10">
                         <input
                             type="checkbox"
                             checked={hideCancelled}
                             onChange={(e) => setHideCancelled(e.target.checked)}
                             className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
                         />
-                        <span>Stornierte ausblenden</span>
+                        <span>Stornierte ausbl.</span>
+                    </label>
+                </div>
+                <div className="flex items-end"> {/* New filter for finalized */}
+                     <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer p-2 bg-slate-700 rounded-md hover:bg-slate-600 w-full h-10">
+                        <input
+                            type="checkbox"
+                            checked={hideFinalized}
+                            onChange={(e) => setHideFinalized(e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
+                        />
+                        <span>Festgeschr. ausbl.</span>
                     </label>
                 </div>
             </div>
+             <p className="text-xs text-gray-400 mt-3">
+                Hinweis: Das Ausblenden von ETV=0 Produkten ist eine globale Einstellung ("Einstellungen").
+            </p>
         </div>
       </div>
       
@@ -160,12 +173,20 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ products, onUpdateProduct
       <div>
         <h2 className="text-2xl font-semibold text-gray-100 mb-4">Produktliste ({filteredProducts.length})</h2>
         {filteredProducts.length > 0 ? (
-            <ProductTable products={filteredProducts} onUpdateProduct={onUpdateProduct} />
+            <ProductTable 
+                products={filteredProducts} 
+                onUpdateProduct={onUpdateProduct} 
+                onSaveAndFinalizeProduct={onSaveAndFinalizeProduct} // Pass new handler
+                euerSettings={euerSettings} // Pass EuerSettings
+                belegSettings={belegSettings} // Pass BelegSettings
+            />
         ): (
             <div className="text-center py-10 bg-slate-800 rounded-lg shadow-md border border-slate-700">
                 <FaTimes size={48} className="mx-auto text-gray-500" />
                 <p className="mt-4 text-lg text-gray-400">Keine Produkte für die aktuellen Filter und Suchbegriffe gefunden.</p>
-                <p className="text-sm text-gray-500">Versuchen Sie, die Filter anzupassen, den Suchbegriff zu ändern oder Daten hochzuladen.</p>
+                <p className="text-sm text-gray-500">Versuchen Sie, die Filter anzupassen oder Daten hochzuladen.</p>
+                 {euerSettings.ignoreETVZeroProducts && <p className="text-sm text-yellow-400 mt-2">Hinweis: ETV=0 Produkte sind global ausgeblendet.</p>}
+                 {hideFinalized && <p className="text-sm text-yellow-400 mt-2">Hinweis: Festgeschriebene Produkte sind ausgeblendet.</p>}
             </div>
         )}
       </div>

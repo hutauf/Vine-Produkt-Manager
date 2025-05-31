@@ -1,15 +1,17 @@
 
 import React, { useState, useMemo } from 'react';
-import { Product, ProductUsage } from '../../types';
+import { Product, ProductUsage, EuerSettings, BelegSettings } from '../../types'; // Added EuerSettings, BelegSettings
 import EditProductModal from './EditProductModal';
-// Fix: Replaced FaAnglesLeft with FaAngleDoubleLeft and FaAnglesRight with FaAngleDoubleRight
 import { FaSort, FaSortUp, FaSortDown, FaEdit, FaAngleLeft, FaAngleRight, FaAngleDoubleLeft, FaAngleDoubleRight } from 'react-icons/fa';
 import Button from '../Common/Button';
-import { parseDMYtoDate } from '../../utils/dateUtils'; // Import the new utility
+import { parseDMYtoDate } from '../../utils/dateUtils'; 
 
 interface ProductTableProps {
   products: Product[];
-  onUpdateProduct: (product: Product) => void;
+  onUpdateProduct: (product: Product) => Promise<void>;
+  onSaveAndFinalizeProduct: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New prop
+  euerSettings: EuerSettings; // New prop
+  belegSettings: BelegSettings; // New prop
 }
 
 type SortKey = keyof Product | 'calculatedTeilwert';
@@ -17,14 +19,18 @@ type SortOrder = 'asc' | 'desc';
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 
-const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }) => {
+const ProductTable: React.FC<ProductTableProps> = ({ 
+    products, 
+    onUpdateProduct, 
+    onSaveAndFinalizeProduct, 
+    euerSettings,
+    belegSettings
+}) => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(ITEMS_PER_PAGE_OPTIONS[1]); // Default to 25
-
-  // Removed local parseDate, using parseDMYtoDate from dateUtils
+  const [itemsPerPage, setItemsPerPage] = useState(ITEMS_PER_PAGE_OPTIONS[1]);
 
   const getCalculatedTeilwert = (product: Product): number => {
     if (product.myTeilwert != null) return product.myTeilwert;
@@ -71,7 +77,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }
       setSortKey(key);
       setSortOrder('asc');
     }
-    setCurrentPage(1); // Reset to first page on sort
+    setCurrentPage(1);
   };
 
   const renderSortIcon = (key: SortKey) => {
@@ -85,12 +91,12 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }
     if (dateObj) {
       return dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
-    return dateString; // Fallback to original string if parsing failed (should not happen with normalization)
+    return dateString;
   };
   
   const handleItemsPerPageChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setItemsPerPage(Number(event.target.value));
-    setCurrentPage(1); // Reset to first page
+    setCurrentPage(1);
   };
 
   const renderPaginationControls = () => {
@@ -187,7 +193,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }
           </thead>
           <tbody className="bg-slate-800 divide-y divide-slate-700">
             {paginatedProducts.map((item) => (
-              <tr key={item.ASIN} className="hover:bg-slate-750 transition-colors">
+              <tr key={item.ASIN} className={`hover:bg-slate-750 transition-colors ${item.festgeschrieben === 1 ? 'opacity-70' : ''}`}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-sky-400">{item.ASIN}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300" data-order={parseDMYtoDate(item.date)?.getTime() ?? 0}>
                   {formatDateDisplay(item.date)}
@@ -211,7 +217,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }
                     ) : (item.teilwert != null ? `${item.teilwert.toFixed(2)} €` : 'N/A')}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-300">
-                  {item.usageStatus.length > 0 ? item.usageStatus.join(', ') : '-'}
+                  {item.festgeschrieben === 1 ? <span className="text-green-400 font-semibold">Festgeschr.</span> : (item.usageStatus.length > 0 ? item.usageStatus.join(', ') : '-')}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm">
                   {item.pdf ? (
@@ -255,10 +261,13 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onUpdateProduct }
           product={editingProduct}
           isOpen={!!editingProduct}
           onClose={() => setEditingProduct(null)}
-          onSave={(updatedProd) => {
-            onUpdateProduct(updatedProd);
+          onSave={async (updatedProd) => {
+            await onUpdateProduct(updatedProd); // Ensure it's awaited if it's async
             setEditingProduct(null);
           }}
+          onSaveAndFinalize={onSaveAndFinalizeProduct} // Pass new handler
+          euerSettings={euerSettings} // Pass EuerSettings
+          belegSettings={belegSettings} // Pass BelegSettings
         />
       )}
     </>
