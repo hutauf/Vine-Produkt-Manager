@@ -28,7 +28,8 @@ export const DEFAULT_EUER_SETTINGS: EuerSettings = {
   streuArtikelLimitValue: 11.90,
   euerMethodETVInOutTeilwertEntnahme: false, // Default for new EÜR method
   defaultPrivatentnahmeDelay: "14d", // Default to 2 weeks
-  ignoreETVZeroProducts: false, // New default
+  ignoreETVZeroProducts: false, 
+  useTeilwertV2: false, // Default for Teilwert v2 source
 };
 
 export const TAB_OPTIONS = {
@@ -62,5 +63,11 @@ export const DEFAULT_BELEG_SETTINGS: BelegSettings = {
 
 export const BELEG_SETTINGS_STORAGE_KEY = 'vineApp_belegSettings';
 export const DEFAULT_API_BASE_URL = "https://hutaufvine.pythonanywhere.com/data_operations";
+// Note: The new API endpoint for v2processstatus uses "https://hutauf.pythonanywhere.com/api/get_all"
+// We'll handle this directly in the apiService for v2 calls, or assume it's the same base and only `database` differs.
+// For simplicity, assuming the provided DEFAULT_API_BASE_URL is for the primary product DB.
+// The new v2 database URL structure is "https://hutauf.pythonanywhere.com/api/get_all". We will use this directly.
+export const TEILWERT_V2_API_URL = "https://hutauf.pythonanywhere.com/api/get_all"; 
+
 export const API_BASE_URL_STORAGE_KEY = 'vineApp_apiBaseUrl';
 export const ADDITIONAL_EXPENSES_STORAGE_KEY = 'vineApp_additionalExpenses';

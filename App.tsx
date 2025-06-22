@@ -11,7 +11,7 @@ import SettingsPage from './components/Pages/SettingsPage';
 import BelegePage from './components/Pages/BelegePage';
 import { parseProductsFromFile } from './utils/fileParser';
 import { exportToJson, exportToXlsx } from './utils/dataExporter';
-import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData } from './utils/apiService';
+import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData, apiGetTeilwertV2Data, TeilwertV2ApiValue } from './utils/apiService';
 import { FaKey } from 'react-icons/fa';
 import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
@@ -41,8 +41,6 @@ const App: React.FC = () => {
             console.error("Failed to parse EuerSettings from localStorage:", error);
         }
     }
-    // Merge with defaults to ensure all properties are present,
-    // especially new ones not in older stored settings.
     return { ...DEFAULT_EUER_SETTINGS, ...loadedSettings };
   })();
 
@@ -59,8 +57,9 @@ const App: React.FC = () => {
     }
     // Apply filter based on the potentially updated initialEuerSettings
     if (initialEuerSettings.ignoreETVZeroProducts) {
-      return loadedProducts.filter(p => p.etv !== 0);
+      loadedProducts = loadedProducts.filter(p => p.etv !== 0);
     }
+    // Note: Teilwert v2 application will happen after initial load and API fetch
     return loadedProducts;
   });
 
@@ -149,24 +148,30 @@ const App: React.FC = () => {
   };
 
 
-  const loadProductData = useCallback(async (forceApplyEtvFilter = false) => {
-    if (!apiToken) {
-      if (forceApplyEtvFilter && euerSettings.ignoreETVZeroProducts) {
-          setProducts(prev => prev.filter(p => p.etv !== 0));
-      }
+  const loadProductData = useCallback(async (forceFilterApplication = false) => {
+    if (!apiToken && !forceFilterApplication) { // if no token, only proceed if forcing filter
       return;
     }
+    if (!apiToken && forceFilterApplication) {
+        // Apply local filters if no token but filters changed
+        let currentProds = products;
+        if (euerSettings.ignoreETVZeroProducts) {
+            currentProds = currentProds.filter(p => p.etv !== 0);
+        }
+        // Teilwert V2 cannot be applied without API token
+        setProducts(currentProds);
+        return;
+    }
+
 
     setIsLoading(true);
     setFeedbackMessage(null);
-    const serverResponse = await apiGetAllProducts(apiBaseUrl, apiToken);
+    const serverResponse = await apiGetAllProducts(apiBaseUrl, apiToken!); // Token is checked
     
+    let processedProducts: Product[] = [];
+
     if (serverResponse.status === 'success' && serverResponse.data) {
       let serverProducts = serverResponse.data;
-      if (euerSettings.ignoreETVZeroProducts) {
-        serverProducts = serverProducts.filter(p => p.etv !== 0);
-      }
-
       const localProductsMap = new Map(products.map(p => [p.ASIN, p]));
       
       serverProducts.forEach(serverP => {
@@ -175,51 +180,120 @@ const App: React.FC = () => {
           localProductsMap.set(serverP.ASIN, serverP);
         }
       });
-
-      const mergedProductsArray = Array.from(localProductsMap.values());
-      const finalProducts = euerSettings.ignoreETVZeroProducts 
-        ? mergedProductsArray.filter(p => p.etv !== 0)
-        : mergedProductsArray;
-
-      const sortedFinalProducts = finalProducts.sort((a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
-      
-      setProducts(sortedFinalProducts);
-      setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${sortedFinalProducts.length} Produkte). ETV=0 Filter ${euerSettings.ignoreETVZeroProducts ? 'aktiv' : 'inaktiv'}.`, type: 'success' });
+      processedProducts = Array.from(localProductsMap.values());
+      // Initial success message before V2 data, if any
+      setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen (${processedProducts.length}). Verarbeite Teilwert V2...`, type: 'info' });
 
     } else {
+      processedProducts = [...products]; // Use local data on error
       const fullErrorMessage = `Fehler beim Laden der Produkte vom Server: ${serverResponse.message || 'Unbekannter Fehler.'} Lokale Daten werden beibehalten.`;
       setFeedbackMessage({ text: fullErrorMessage, type: 'error' });
       
       if (serverResponse.message && serverResponse.message.toLowerCase().includes('failed to fetch')) {
-        console.error(
-            "Detailed 'Failed to fetch' error received. This is often an environment, CORS, or network issue. See the full error message displayed in the UI and investigate logs from apiService.ts. The original response object from apiService was:", 
-            serverResponse
-        );
+        console.error("Detailed 'Failed to fetch' error", serverResponse);
       }
       if (serverResponse.message?.toLowerCase().includes("invalid token")) {
         setApiToken(null); 
         setFeedbackMessage({ text: "Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.", type: 'error' });
       }
-      if (forceApplyEtvFilter && euerSettings.ignoreETVZeroProducts) {
-          setProducts(prev => prev.filter(p => p.etv !== 0));
-      }
     }
+
+    // Apply Teilwert V2 data if setting is active
+    if (euerSettings.useTeilwertV2 && apiToken) {
+        const teilwertV2Response = await apiGetTeilwertV2Data(apiToken);
+        if (teilwertV2Response.status === 'success' && teilwertV2Response.data) {
+            const teilwertV2Map = new Map<string, number>();
+            for (const asinKey in teilwertV2Response.data) {
+                try {
+                    const parsedValue = JSON.parse(teilwertV2Response.data[asinKey]) as Partial<TeilwertV2ApiValue>;
+                    if (parsedValue && typeof parsedValue.Teilwert === 'number') {
+                        teilwertV2Map.set(asinKey, parsedValue.Teilwert);
+                    }
+                } catch (e) {
+                    console.warn(`Fehler beim Parsen der Teilwert V2 Daten für ASIN ${asinKey}:`, e);
+                }
+            }
+            
+            processedProducts = processedProducts.map(p => {
+                const v2Teilwert = teilwertV2Map.get(p.ASIN);
+                if (v2Teilwert !== undefined) { // V2 data exists for this ASIN
+                    return {
+                        ...p,
+                        teilwert: v2Teilwert,
+                        pdf: `https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/XBhdyIB8tZZK2IOWzPl4GKJ5_AoHTeFHIHoTbAk8k6ypbRugFOzMxLeUeCSYz96-/n/frlwfg9yseap/b/bucket-20240714-1645/o/Teilwert_v2_${p.ASIN}.pdf`,
+                    };
+                } else { // V2 data does NOT exist for this ASIN, but useTeilwertV2 is ON
+                    return {
+                        ...p,
+                        teilwert: null, // "Forget" old Teilwert
+                        pdf: undefined, // "Forget" old PDF
+                    };
+                }
+            });
+            setFeedbackMessage({ text: `Produktdaten synchronisiert. Teilwert V2 Daten angewendet.`, type: 'success' });
+        } else if (teilwertV2Response.status === 'error') {
+            setFeedbackMessage({ text: `Warnung: Konnte Teilwert V2 Daten nicht laden: ${teilwertV2Response.message}. Bestehende Teilwerte werden verwendet oder ggf. genullt.`, type: 'info' });
+             // If Teilwert V2 fetch fails but setting is on, nullify existing Teilwerts as per "forget" logic
+            processedProducts = processedProducts.map(p => ({
+                ...p,
+                teilwert: null,
+                pdf: undefined,
+            }));
+        }
+    }
+    
+    // Apply ignoreETVZeroProducts filter
+    if (euerSettings.ignoreETVZeroProducts) {
+      processedProducts = processedProducts.filter(p => p.etv !== 0);
+    }
+
+    const sortedFinalProducts = processedProducts.sort((a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
+    setProducts(sortedFinalProducts);
+    
+    if (serverResponse.status === 'success' && !euerSettings.useTeilwertV2) { // If V2 wasn't even attempted.
+        setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${sortedFinalProducts.length} Produkte).`, type: 'success' });
+    }
+    
     setIsLoading(false);
-  }, [apiToken, products, euerSettings.ignoreETVZeroProducts, apiBaseUrl]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiToken, apiBaseUrl, euerSettings.ignoreETVZeroProducts, euerSettings.useTeilwertV2]); // products removed to avoid loop with its own update
+
 
   const setEuerSettings = (newSettings: EuerSettings | ((prevState: EuerSettings) => EuerSettings)) => {
     const oldSettings = euerSettings;
     setEuerSettingsState(prevSettings => {
         const updatedSettings = typeof newSettings === 'function' ? newSettings(prevSettings) : newSettings;
-        if (updatedSettings.ignoreETVZeroProducts && !oldSettings.ignoreETVZeroProducts) {
-            setProducts(prevProducts => prevProducts.filter(p => p.etv !== 0));
-            setFeedbackMessage({ text: "Produkte mit ETV=0 wurden lokal ausgeblendet.", type: 'info' });
-        } else if (!updatedSettings.ignoreETVZeroProducts && oldSettings.ignoreETVZeroProducts) {
-            if (apiToken) {
-                setFeedbackMessage({ text: "Lade Daten vom Server, um ETV=0 Produkte wiederherzustellen...", type: 'info' });
-                loadProductData(true);
+        
+        let needsReload = false;
+        if (updatedSettings.ignoreETVZeroProducts !== oldSettings.ignoreETVZeroProducts) {
+            needsReload = true;
+            if (updatedSettings.ignoreETVZeroProducts) {
+                setFeedbackMessage({ text: "Produkte mit ETV=0 werden lokal ausgeblendet.", type: 'info' });
             } else {
-                setFeedbackMessage({ text: "ETV=0 Filter deaktiviert. Ohne API Token können Produkte nicht vom Server nachgeladen werden.", type: 'info' });
+                 setFeedbackMessage({ text: "Filter für ETV=0 Produkte deaktiviert.", type: 'info' });
+            }
+        }
+        if (updatedSettings.useTeilwertV2 !== oldSettings.useTeilwertV2) {
+            needsReload = true;
+            setFeedbackMessage({ text: `Teilwert V2 Daten ${updatedSettings.useTeilwertV2 ? 'aktiviert' : 'deaktiviert'}. Lade Daten neu...`, type: 'info' });
+        }
+
+        if (needsReload) {
+            // Directly call loadProductData with forceFilterApplication true
+            // This is tricky because loadProductData itself uses 'euerSettings' from state.
+            // The state update is async. For an immediate effect based on *updatedSettings*:
+            if (apiToken) {
+                 // Trigger reload by changing a dependency of the useEffect that calls loadProductData,
+                 // or by calling it directly after a timeout to let state update.
+                 // For now, will rely on the useEffect down below.
+            } else {
+                 // If no API token, apply filters locally for ignoreETVZero. Teilwert V2 needs API.
+                 if (updatedSettings.ignoreETVZeroProducts && !oldSettings.ignoreETVZeroProducts) {
+                    setProducts(prevProducts => prevProducts.filter(p => p.etv !== 0));
+                 }
+                 // If useTeilwertV2 changes without API token, we can't fetch V2, so V1 remains or becomes null if V2 was on.
+                 // This local-only update for V2 source is complex without refetching.
+                 // The loadProductData will handle this on next apiToken-driven call.
             }
         }
         return updatedSettings;
@@ -227,11 +301,14 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (apiToken) {
+    if (apiToken) { // Load data if token exists (initial or after change) or if settings that require reload change
         loadProductData();
+    } else {
+        // If API token is removed, we might want to clear products or apply filters to existing local products
+        // For now, local products persist. Filter application happens on setting change.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps 
-  }, [apiToken, apiBaseUrl]); 
+  }, [apiToken, apiBaseUrl, euerSettings.useTeilwertV2, euerSettings.ignoreETVZeroProducts]); // Added settings that trigger reload
 
   useEffect(() => {
     localStorage.setItem(EUER_SETTINGS_STORAGE_KEY, JSON.stringify(euerSettings));
@@ -272,7 +349,7 @@ const App: React.FC = () => {
   const handleClearLocalDataAndToken = () => {
     setApiToken(null); 
     setProducts([]);
-    setAdditionalExpenses([]); // Clear additional expenses as well
+    setAdditionalExpenses([]); 
     setFeedbackMessage({ text: "Lokale Produktdaten, Ausgaben und API Token entfernt.", type: 'success' });
   };
 
@@ -281,13 +358,11 @@ const App: React.FC = () => {
     setFeedbackMessage(null);
     try {
       let parsedProductsFromFile = await parseProductsFromFile(file);
-      
-      if (euerSettings.ignoreETVZeroProducts) {
-          parsedProductsFromFile = parsedProductsFromFile.filter(p => p.etv !== 0);
-      }
+      // ETV=0 filter is applied in loadProductData after potential merge
+      // Teilwert V2 is also applied in loadProductData
 
       if (parsedProductsFromFile.length === 0) {
-        setFeedbackMessage({ text: `Keine Produkte in Datei gefunden oder alle hatten ETV=0 (Filter aktiv: ${euerSettings.ignoreETVZeroProducts}).`, type: 'info' });
+        setFeedbackMessage({ text: `Keine Produkte in Datei gefunden.`, type: 'info' });
         setIsLoading(false);
         return;
       }
@@ -318,16 +393,19 @@ const App: React.FC = () => {
       }
 
       if (!apiToken) {
-        setProducts(prevProducts => {
-          const productsMap = new Map(prevProducts.map(p => [p.ASIN, p]));
-          productsToActuallyProcess.forEach(p => productsMap.set(p.ASIN, p));
-          const newProductArray = Array.from(productsMap.values());
-          const finalProducts = euerSettings.ignoreETVZeroProducts 
-                                ? newProductArray.filter(p => p.etv !== 0) 
-                                : newProductArray;
-          return finalProducts.sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
-        });
-        setFeedbackMessage({ text: `Lokal importiert/aktualisiert (${productsToActuallyProcess.length} verarbeitet, ${skippedCount} ältere übersprungen).`, type: 'info' });
+        // Merge locally, then loadProductData will apply V2 and ETV filters if settings active
+        const productsMap = new Map(products.map(p => [p.ASIN, p]));
+        productsToActuallyProcess.forEach(p => productsMap.set(p.ASIN, p));
+        let newProductArray = Array.from(productsMap.values());
+        
+        // Apply filters directly for local update if no API token for loadProductData to do it
+        if (euerSettings.ignoreETVZeroProducts) {
+            newProductArray = newProductArray.filter(p => p.etv !== 0);
+        }
+        // Teilwert V2 cannot be applied here without an API call. It will be applied on next API-driven load.
+        
+        setProducts(newProductArray.sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0)));
+        setFeedbackMessage({ text: `Lokal importiert/aktualisiert (${productsToActuallyProcess.length} verarbeitet, ${skippedCount} ältere übersprungen). ETV=0 Filter ${euerSettings.ignoreETVZeroProducts ? 'aktiv' : 'inaktiv'}. Teilwert V2 ${euerSettings.useTeilwertV2 ? 'aktiv (wird bei nächstem Sync geladen)' : 'inaktiv'}.`, type: 'info' });
       } else {
         const response = await apiUpdateProducts(apiBaseUrl, apiToken, productsToActuallyProcess);
         if (response.status === 'success') {
@@ -355,6 +433,7 @@ const App: React.FC = () => {
         last_update_time: Math.floor(Date.now() / 1000) 
     };
 
+    // Apply ETV=0 filter locally immediately
     if (euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0) {
       setProducts(prevProducts => prevProducts.filter(p => p.ASIN !== productWithTimestamp.ASIN));
       setFeedbackMessage({text: `Produkt ${productWithTimestamp.ASIN} hat ETV=0, lokal ausgeblendet (Filter aktiv). Änderung wird gespeichert.`, type: 'info'});
@@ -367,6 +446,9 @@ const App: React.FC = () => {
         ).sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0))
         );
     }
+    // Note: Teilwert V2 is primarily applied on load. If a user edits a product,
+    // the `teilwert` field they edit is what's saved. If `useTeilwertV2` is on,
+    // the next `loadProductData` would re-apply V2 data if available from server.
 
     if (!apiToken) {
       if (!(euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0)) {
@@ -379,10 +461,13 @@ const App: React.FC = () => {
     const response = await apiUpdateSingleProduct(apiBaseUrl, apiToken, productWithTimestamp);
     if (response.status === 'success') {
       setFeedbackMessage({text: `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert.`, type: 'success'});
+      // Potentially reload this single product or all to reflect V2 if setting is on
+      await loadProductData(); 
     } else {
       setFeedbackMessage({ text: `Server-Aktualisierungsfehler für ${productWithTimestamp.ASIN}: ${response.message || 'Unbekannt.'} Lokale Änderung bleibt.`, type: 'error' });
     }
     setIsLoading(false);
+    // Final filter application after potential server interaction
     if (euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0) {
         setProducts(prev => prev.filter(p => p.etv !== 0));
     }
@@ -505,8 +590,11 @@ const App: React.FC = () => {
     productToSaveAndFinalize: Product,
     attachExtPdf: boolean
   ): Promise<{success: boolean; message: string}> => {
+    // Save first, which might update the product in state, including its `pdf` link if V2 is active
     await handleSaveProductDetails(productToSaveAndFinalize); 
+    // Find the latest version from state, as handleSaveProductDetails updates it and might trigger re-sort or filter
     const potentiallyUpdatedProduct = products.find(p => p.ASIN === productToSaveAndFinalize.ASIN) || productToSaveAndFinalize;
+    
     const festschreibenResult = await executeFestschreiben(potentiallyUpdatedProduct, attachExtPdf);
     setFeedbackMessage({ text: festschreibenResult.message, type: festschreibenResult.success ? 'success' : 'error'});
     return festschreibenResult;
@@ -519,54 +607,31 @@ const App: React.FC = () => {
     }
     setIsLoading(true);
     setFeedbackMessage({ text: "Starte vollständige Synchronisation...", type: 'info' });
-
-    const freshServerResponse = await apiGetAllProducts(apiBaseUrl, apiToken); 
-     if (freshServerResponse.status === 'error' || !freshServerResponse.data) {
-      setFeedbackMessage({ text: `Fehler beim Abrufen der Serverdaten: ${freshServerResponse.message || 'Unbekannter Fehler.'}`, type: 'error' });
-      setIsLoading(false);
-      return;
-    }
-    let serverProducts = freshServerResponse.data;
-
-    setFeedbackMessage({ text: `Serverdaten (${serverProducts.length}) erfolgreich abgerufen. Mische mit lokalen Daten...`, type: 'info' });
-
-    const currentLocalProducts = products; 
-    const productMap = new Map<string, Product>();
-
-    serverProducts.forEach(serverP => {
-      productMap.set(serverP.ASIN, serverP);
-    });
-
-    currentLocalProducts.forEach(localP => {
-      const versionInMap = productMap.get(localP.ASIN);
-      if (!versionInMap || (localP.last_update_time || 0) > (versionInMap.last_update_time || 0)) {
-        productMap.set(localP.ASIN, { ...localP, last_update_time: localP.last_update_time || Math.floor(Date.now() / 1000) });
-      }
-    });
     
-    let mergedProductsForUpload = Array.from(productMap.values()) 
-      .map(p => ({...p, last_update_time: p.last_update_time || Math.floor(Date.now() / 1000) }));
+    // loadProductData handles fetching, merging with local, applying V2, and ETV filters
+    await loadProductData(); 
 
-    let mergedProductsForState = [...mergedProductsForUpload]; 
-    if (euerSettings.ignoreETVZeroProducts) {
-        mergedProductsForState = mergedProductsForState.filter(p => p.etv !== 0);
-    }
-    const sortedMergedProductsForState = mergedProductsForState.sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
+    // After loadProductData, `products` state contains the merged and processed data.
+    // Now, upload this comprehensive list to the server.
+    if (products.length > 0) {
+        const productsWithTimestamps = products.map(p => ({
+            ...p, 
+            last_update_time: p.last_update_time || Math.floor(Date.now() / 1000)
+        }));
 
-    setProducts(sortedMergedProductsForState);
-    setFeedbackMessage({ text: `Daten gemischt (${sortedMergedProductsForState.length} lokal angezeigt). Lade ${mergedProductsForUpload.length} auf Server hoch...`, type: 'info' });
-
-    if (mergedProductsForUpload.length > 0) {
-        const uploadResponse = await apiUpdateProducts(apiBaseUrl, apiToken, mergedProductsForUpload);
+        setFeedbackMessage({ text: `Lokale Daten gemischt (${productsWithTimestamps.length}). Lade auf Server hoch...`, type: 'info' });
+        const uploadResponse = await apiUpdateProducts(apiBaseUrl, apiToken, productsWithTimestamps);
         if (uploadResponse.status === 'success') {
             const { inserted = 0, updated = 0, skipped = 0 } = uploadResponse;
-            setFeedbackMessage({ text: `Vollständige Synchronisation erfolgreich! Server: ${inserted} neu, ${updated} aktual., ${skipped} überspr.`, type: 'success' });
-            await loadProductData();
+            setFeedbackMessage({ text: `Vollständige Synchronisation erfolgreich! Server: ${inserted} neu, ${updated} aktual., ${skipped} überspr. Lade erneut...`, type: 'success' });
+            await loadProductData(); // Final load to ensure consistency
         } else {
             setFeedbackMessage({ text: `Fehler beim Hochladen der gemischten Daten: ${uploadResponse.message || 'Unbekannter Fehler.'}`, type: 'error' });
         }
     } else {
-         setFeedbackMessage({ text: `Vollständige Synchronisation abgeschlossen. Keine Produkte zum Hochladen.`, type: 'success' });
+         setFeedbackMessage({ text: `Vollständige Synchronisation abgeschlossen. Keine lokalen Produkte zum Hochladen.`, type: 'success' });
+         // Still call loadProductData to ensure clean state if local was empty but server has data
+         await loadProductData();
     }
     setIsLoading(false);
   };

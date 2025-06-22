@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product, ProductUsage, EuerSettings, BelegSettings } from '../../types';
 import ProductTable from '../Products/ProductTable';
 import FileUpload from '../Products/FileUpload';
@@ -10,11 +10,15 @@ import { parseDMYtoDate } from '../../utils/dateUtils';
 interface DashboardPageProps {
   products: Product[];
   onUpdateProduct: (product: Product) => Promise<void>;
-  onSaveAndFinalizeProduct: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New prop
+  onSaveAndFinalizeProduct: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>;
   onFileUpload: (file: File) => Promise<void>;
   euerSettings: EuerSettings;
-  belegSettings: BelegSettings; // New prop
+  belegSettings: BelegSettings;
 }
+
+const DASHBOARD_YEAR_FILTER_KEY = 'vineApp_dashboard_yearFilter';
+const DASHBOARD_HIDE_CANCELLED_KEY = 'vineApp_dashboard_hideCancelledFilter';
+const DASHBOARD_HIDE_FINALIZED_KEY = 'vineApp_dashboard_hideFinalizedFilter';
 
 const DashboardPage: React.FC<DashboardPageProps> = ({ 
     products, 
@@ -24,11 +28,31 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     euerSettings,
     belegSettings 
 }) => {
-  const [yearFilter, setYearFilter] = useState<string>('all');
-  const [hideCancelled, setHideCancelled] = useState<boolean>(false);
-  const [hideFinalized, setHideFinalized] = useState<boolean>(true); // New filter, default true
+  const [yearFilter, setYearFilter] = useState<string>(() => {
+    return localStorage.getItem(DASHBOARD_YEAR_FILTER_KEY) || 'all';
+  });
+  const [hideCancelled, setHideCancelled] = useState<boolean>(() => {
+    const stored = localStorage.getItem(DASHBOARD_HIDE_CANCELLED_KEY);
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [hideFinalized, setHideFinalized] = useState<boolean>(() => {
+    const stored = localStorage.getItem(DASHBOARD_HIDE_FINALIZED_KEY);
+    return stored ? JSON.parse(stored) : false; // Default for hideFinalized is now false
+  });
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [isLoadingUpload, setIsLoadingUpload] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_YEAR_FILTER_KEY, yearFilter);
+  }, [yearFilter]);
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_HIDE_CANCELLED_KEY, JSON.stringify(hideCancelled));
+  }, [hideCancelled]);
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_HIDE_FINALIZED_KEY, JSON.stringify(hideFinalized));
+  }, [hideFinalized]);
 
   const getCalculatedTeilwert = (product: Product): number => {
     if (product.myTeilwert != null) return product.myTeilwert;
@@ -56,6 +80,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     return ['all', ...Array.from(years).sort((a,b) => parseInt(b) - parseInt(a))];
   }, [products]);
 
+  useEffect(() => {
+    // Ensure yearFilter is valid if it's not 'all' and not in availableYears
+    // This can happen if localStorage had a year that's no longer in the product data
+    if (yearFilter !== 'all' && !availableYears.includes(yearFilter)) {
+      setYearFilter('all');
+    }
+  }, [availableYears, yearFilter]);
+
   const filteredProducts = useMemo(() => {
     let tempProducts = products; 
 
@@ -71,7 +103,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           p.etv.toString().includes(lowerSearchTerm) ||
           calculatedTeilwert.toString().includes(lowerSearchTerm) ||
           (p.myTeilwert?.toString() ?? '').includes(lowerSearchTerm) ||
-          (p.teilwert.toString() ?? '').includes(lowerSearchTerm) ||
+          (p.teilwert?.toString() ?? '').includes(lowerSearchTerm) ||
           p.usageStatus.join(', ').toLowerCase().includes(lowerSearchTerm)
         );
       });
@@ -88,7 +120,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         }
       }
       if (hideCancelled && p.usageStatus.includes(ProductUsage.STORNIERT)) return false;
-      if (hideFinalized && p.festgeschrieben === 1) return false; // New filter condition
+      if (hideFinalized && p.festgeschrieben === 1) return false;
       return true;
     });
   }, [products, yearFilter, hideCancelled, hideFinalized, globalSearchTerm, euerSettings.ignoreETVZeroProducts]);
@@ -109,7 +141,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center">
                 <FaFilter className="mr-2 text-sky-400" /> Filteroptionen
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"> {/* Changed to sm:grid-cols-3 */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                     <label htmlFor="yearFilter" className="block text-sm font-medium text-gray-300">Jahr</label>
                     <select
@@ -128,17 +160,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                             checked={hideCancelled}
                             onChange={(e) => setHideCancelled(e.target.checked)}
                             className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
+                            aria-label="Stornierte Produkte ausblenden"
                         />
                         <span>Stornierte ausbl.</span>
                     </label>
                 </div>
-                <div className="flex items-end"> {/* New filter for finalized */}
+                <div className="flex items-end">
                      <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer p-2 bg-slate-700 rounded-md hover:bg-slate-600 w-full h-10">
                         <input
                             type="checkbox"
                             checked={hideFinalized}
                             onChange={(e) => setHideFinalized(e.target.checked)}
                             className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
+                            aria-label="Festgeschriebene Produkte ausblenden"
                         />
                         <span>Festgeschr. ausbl.</span>
                     </label>
@@ -176,9 +210,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             <ProductTable 
                 products={filteredProducts} 
                 onUpdateProduct={onUpdateProduct} 
-                onSaveAndFinalizeProduct={onSaveAndFinalizeProduct} // Pass new handler
-                euerSettings={euerSettings} // Pass EuerSettings
-                belegSettings={belegSettings} // Pass BelegSettings
+                onSaveAndFinalizeProduct={onSaveAndFinalizeProduct}
+                euerSettings={euerSettings}
+                belegSettings={belegSettings}
             />
         ): (
             <div className="text-center py-10 bg-slate-800 rounded-lg shadow-md border border-slate-700">

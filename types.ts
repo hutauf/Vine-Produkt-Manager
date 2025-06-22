@@ -16,7 +16,7 @@ export interface Product {
   date: string; // Format: DD/MM/YYYY (Order Date)
   etv: number;
   keepa?: number | null;
-  teilwert: number | null; // <--- MODIFIED HERE
+  teilwert: number | null; 
   pdf?: string;
   myTeilwert?: number | null;
   myTeilwertReason?: string;
@@ -38,6 +38,7 @@ export interface EuerSettings {
   euerMethodETVInOutTeilwertEntnahme: boolean; // New EÜR calculation method
   defaultPrivatentnahmeDelay: string; // e.g., "0d", "7d", "14d", "28d", "90d", "180d"
   ignoreETVZeroProducts: boolean; // New setting
+  useTeilwertV2: boolean; // New setting for Teilwert v2 source
 }
 
 export interface UserAddressData {

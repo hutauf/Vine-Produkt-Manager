@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../Common/Button';
 import Modal from '../Common/Modal';
-import { FaSave, FaTrashAlt, FaCalendarAlt, FaExclamationTriangle, FaGlobe } from 'react-icons/fa';
+import { FaSave, FaTrashAlt, FaCalendarAlt, FaExclamationTriangle, FaGlobe, FaDatabase } from 'react-icons/fa';
 import { FaKey, FaServer, FaBroom, FaWandMagicSparkles } from 'react-icons/fa6';
 import { EuerSettings } from '../../types'; // Import EuerSettings
 import { convertISOToGerman, convertGermanToISO, getTodayGermanFormat } from '../../utils/dateUtils'; // For date input
@@ -14,11 +14,11 @@ interface SettingsPageProps {
   onApiTokenChange: (token: string) => void;
   apiBaseUrl: string;
   onApiBaseUrlChange: (url: string) => void;
-  euerSettings: EuerSettings; // Added EuerSettings
-  onEuerSettingsChange: (settings: EuerSettings) => void; // Added EuerSettings handler
+  euerSettings: EuerSettings; 
+  onEuerSettingsChange: (settings: EuerSettings) => void; 
   onDeleteAllServerData: () => Promise<void>;
   onClearLocalDataAndToken: () => void;
-  onBulkFestschreiben: (dateYYYYMMDD: string) => Promise<void>; // For bulk action
+  onBulkFestschreiben: (dateYYYYMMDD: string) => Promise<void>; 
 }
 
 const DEMO_TOKEN = 'f08h2h8923fh48923h4f8923hf89r23f';
@@ -41,7 +41,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const [isDeletingServerData, setIsDeletingServerData] = useState(false);
   const [isClearingLocalData, setIsClearingLocalData] = useState(false);
 
-  const [bulkFestschreibenDate, setBulkFestschreibenDate] = useState<string>(convertGermanToISO(getTodayGermanFormat())); // YYYY-MM-DD for date input
+  const [bulkFestschreibenDate, setBulkFestschreibenDate] = useState<string>(convertGermanToISO(getTodayGermanFormat())); 
   const [showBulkFestschreibenConfirmModal, setShowBulkFestschreibenConfirmModal] = useState(false);
   const [isBulkFestschreibenLoading, setIsBulkFestschreibenLoading] = useState(false);
 
@@ -92,7 +92,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   
   const handleBulkFestschreibenAttempt = () => {
     if (!bulkFestschreibenDate) {
-        // Feedback should be handled by App.tsx if it shows a global message
         alert("Bitte wählen Sie ein Datum für die Massen-Festschreibung.");
         return;
     }
@@ -101,7 +100,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
 
   const handleBulkFestschreibenConfirmed = async () => {
     setIsBulkFestschreibenLoading(true);
-    await onBulkFestschreiben(bulkFestschreibenDate); // Pass YYYY-MM-DD
+    await onBulkFestschreiben(bulkFestschreibenDate); 
     setIsBulkFestschreibenLoading(false);
     setShowBulkFestschreibenConfirmModal(false);
   };
@@ -112,12 +111,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
       {/* API Synchronisation Section */}
       <div>
         <h2 className="text-2xl font-semibold text-gray-100 mb-6 flex items-center">
-          <FaServer className="mr-3 text-sky-400" /> API Synchronisation
+          <FaServer className="mr-3 text-sky-400" /> API Synchronisation (Primäre Produktdatenbank)
         </h2>
         <div className="space-y-4">
           <div>
             <label htmlFor="apiTokenInput" className="block text-sm font-medium text-gray-300">
-              API Token
+              API Token (für beide Datenbanken)
             </label>
             <input
               id="apiTokenInput"
@@ -146,7 +145,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
            {!apiToken && (
              <p className="text-xs text-gray-400 mt-2">
-                Der Demo-Token lädt einen Beispieldatensatz. Änderungen mit dem Demo-Token werden nicht dauerhaft gespeichert.
+                Der Demo-Token lädt einen Beispieldatensatz. Änderungen mit dem Demo-Token werden nicht dauerhaft gespeichert. Der gleiche Token wird für beide Datenbankabfragen verwendet.
               </p>
            )}
         </div>
@@ -155,9 +154,27 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
       {/* Allgemeine Produkteinstellungen Section */}
       <div className="pt-6 border-t border-slate-700">
          <h2 className="text-2xl font-semibold text-gray-100 mb-6 flex items-center">
-          Allgemeine Produkteinstellungen
+            <FaDatabase className="mr-3 text-sky-400" /> Datenquellen & Produktfilter
         </h2>
-        <div className="space-y-4">
+        <div className="space-y-6">
+            {/* Teilwert V2 Source */}
+            <div>
+                <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={euerSettings.useTeilwertV2}
+                        onChange={(e) => handleEuerSettingChange('useTeilwertV2', e.target.checked)}
+                        className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
+                    />
+                    <span>Teilwert v2 (aus "v2processstatus" Datenbank) verwenden</span>
+                </label>
+                <p className="text-xs text-gray-500 mt-1 pl-6">
+                    Wenn aktiv, wird der Teilwert und der zugehörige PDF-Link aus der neueren v2 Datenbank geladen.
+                    Falls für ein Produkt keine v2 Daten gefunden werden, wird der Teilwert auf 'null' gesetzt.
+                    Sonst wird der ursprüngliche Teilwert aus der Haupt-Produktdatenbank verwendet.
+                </p>
+            </div>
+
             {/* StreuArtikelRegelung */}
             <div>
                 <label className="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
@@ -209,19 +226,19 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
       <div className="mt-8 pt-6 border-t border-slate-700">
         <h3 className="text-lg font-semibold text-red-400 mb-3 flex items-center"><FaExclamationTriangle className="mr-2"/> Gefahrenzone</h3>
         <div className="space-y-6">
-          {/* API Base URL Configuration */}
+          {/* API Base URL Configuration for main product DB */}
           <div className="pt-4 border-t border-slate-600">
-              <h4 className="text-md font-medium text-red-300 mb-1">Backend API URL</h4>
+              <h4 className="text-md font-medium text-red-300 mb-1">Backend API URL (Primäre Produktdatenbank)</h4>
               <p className="text-sm text-gray-400 mb-2">
-                  Hier kann die URL des Backends geändert werden. Änderungen mit Bedacht vornehmen.
+                  URL für die Haupt-Produktdatenbank (<code>data_operations</code>). Die URL für Teilwert v2 (<code>api/get_all</code>) ist fest codiert.
               </p>
               <input
                 type="text"
                 value={currentApiBaseUrlValue}
                 onChange={(e) => setCurrentApiBaseUrlValue(e.target.value)}
-                placeholder="https://dein-backend.com/api"
+                placeholder={DEFAULT_API_BASE_URL}
                 className="block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm mb-2"
-                aria-label="Backend API URL Eingabefeld"
+                aria-label="Backend API URL Eingabefeld (Primäre Produktdatenbank)"
               />
               <div className="flex flex-wrap gap-2">
                 <Button variant="danger" onClick={handleApiBaseUrlSave} leftIcon={<FaSave />} aria-label="API URL Speichern">
@@ -236,8 +253,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           {/* Server Data Deletion */}
           <div className="pt-4 border-t border-slate-600">
               <p className="text-sm text-gray-300 mb-2">
-                  Diese Aktion löscht alle deine Produktdaten unwiderruflich vom Server.
-                  Deine lokalen EÜR-Einstellungen sind davon nicht betroffen.
+                  Diese Aktion löscht alle deine Produktdaten unwiderruflich von der primären Server-Datenbank.
+                  Deine lokalen EÜR-Einstellungen und Teilwert v2 Daten sind davon nicht betroffen.
               </p>
               <Button
                   variant="danger"
@@ -245,16 +262,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                   leftIcon={<FaTrashAlt />}
                   isLoading={isDeletingServerData}
                   disabled={!apiToken || apiToken.length === 0 || apiToken === DEMO_TOKEN}
-                  title={apiToken === DEMO_TOKEN ? "Serverdatenlöschung mit Demo Token nicht möglich" : "Alle Produktdaten auf dem Server löschen"}
-                  aria-label="Alle Produktdaten auf dem Server löschen"
+                  title={apiToken === DEMO_TOKEN ? "Serverdatenlöschung mit Demo Token nicht möglich" : "Alle Produktdaten auf dem Server löschen (Primäre DB)"}
+                  aria-label="Alle Produktdaten auf dem Server löschen (Primäre DB)"
               >
-                  Alle Produktdaten auf Server löschen
+                  Primäre Produktdaten auf Server löschen
               </Button>
           </div>
           {/* Clear Local Data */}
           <div className="pt-4 border-t border-slate-600">
               <p className="text-sm text-gray-300 mb-2">
-                  Diese Aktion löscht alle lokal gespeicherten Produktdaten und den API Token aus deinem Browser.
+                  Diese Aktion löscht alle lokal gespeicherten Produktdaten, Ausgaben und den API Token aus deinem Browser.
                   Daten auf dem Server (falls vorhanden) bleiben unberührt. Nützlich für einen kompletten lokalen Reset.
               </p>
               <Button
@@ -262,9 +279,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                   onClick={() => setShowClearLocalConfirmModal(true)}
                   leftIcon={<FaBroom />}
                   isLoading={isClearingLocalData}
-                  aria-label="Alle lokalen Produktdaten und API Token löschen"
+                  aria-label="Alle lokalen Produktdaten, Ausgaben und API Token löschen"
               >
-                  Lokale Daten & Token löschen
+                  Lokale Daten, Ausgaben & Token löschen
               </Button>
           </div>
           {/* Bulk Festschreiben */}
@@ -279,7 +296,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                      <input
                         type="date"
                         value={bulkFestschreibenDate}
-                        onChange={(e) => setBulkFestschreibenDate(e.target.value)} // value is YYYY-MM-DD
+                        onChange={(e) => setBulkFestschreibenDate(e.target.value)} 
                         className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
                         style={{ colorScheme: 'dark' }}
                         aria-label="Datum für Massen-Festschreibung"
@@ -304,18 +321,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         <Modal
           isOpen={showDeleteConfirmModal}
           onClose={() => setShowDeleteConfirmModal(false)}
-          title="Server-Datenlöschung bestätigen"
+          title="Server-Datenlöschung bestätigen (Primäre DB)"
           size="md"
         >
           <p className="text-gray-300 mb-6">
-            Bist du sicher, dass du alle deine Produktdaten vom Server löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.
+            Bist du sicher, dass du alle deine Produktdaten von der primären Server-Datenbank löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.
           </p>
           <div className="flex justify-end space-x-3">
             <Button variant="secondary" onClick={() => setShowDeleteConfirmModal(false)} disabled={isDeletingServerData} aria-label="Abbrechen">
               Abbrechen
             </Button>
             <Button variant="danger" onClick={handleDeleteDataConfirmed} isLoading={isDeletingServerData} aria-label="Ja, Server-Daten löschen">
-              {isDeletingServerData ? 'Wird gelöscht...' : 'Ja, Server-Daten löschen'}
+              {isDeletingServerData ? 'Wird gelöscht...' : 'Ja, Primär-DB Daten löschen'}
             </Button>
           </div>
         </Modal>
@@ -329,7 +346,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           size="md"
         >
           <p className="text-gray-300 mb-6">
-            Bist du sicher, dass du alle lokalen Produktdaten und den API Token aus deinem Browser löschen möchtest? Diese Aktion ist nur lokal und kann nicht rückgängig gemacht werden.
+            Bist du sicher, dass du alle lokalen Produktdaten, Ausgaben und den API Token aus deinem Browser löschen möchtest? Diese Aktion ist nur lokal und kann nicht rückgängig gemacht werden.
           </p>
           <div className="flex justify-end space-x-3">
             <Button variant="secondary" onClick={() => setShowClearLocalConfirmModal(false)} disabled={isClearingLocalData} aria-label="Abbrechen">
