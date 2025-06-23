@@ -87,6 +87,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   };
 
   const handleEuerSettingChange = <K extends keyof EuerSettings>(key: K, value: EuerSettings[K]) => {
+    if (key === 'useTeilwertV2') {
+      console.log('SettingsPage: useTeilwertV2 toggled to', value);
+    }
     onEuerSettingsChange({ ...euerSettings, [key]: value });
   };
   

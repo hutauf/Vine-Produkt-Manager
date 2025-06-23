@@ -149,7 +149,9 @@ const App: React.FC = () => {
 
 
   const loadProductData = useCallback(async (forceFilterApplication = false) => {
+    console.log('loadProductData called', { forceFilterApplication, hasToken: !!apiToken, useTeilwertV2: euerSettings.useTeilwertV2 });
     if (!apiToken && !forceFilterApplication) { // if no token, only proceed if forcing filter
+      console.log('No API token and not forcing filter application. Abort loadProductData');
       return;
     }
     if (!apiToken && forceFilterApplication) {
@@ -160,6 +162,7 @@ const App: React.FC = () => {
         }
         // Teilwert V2 cannot be applied without API token
         setProducts(currentProds);
+        console.log('Applied local filters without API token', { productCount: currentProds.length });
         return;
     }
 
@@ -167,10 +170,12 @@ const App: React.FC = () => {
     setIsLoading(true);
     setFeedbackMessage(null);
     const serverResponse = await apiGetAllProducts(apiBaseUrl, apiToken!); // Token is checked
+    console.log('apiGetAllProducts response', serverResponse);
     
     let processedProducts: Product[] = [];
 
     if (serverResponse.status === 'success' && serverResponse.data) {
+      console.log('Loaded products from server', serverResponse.data.length);
       let serverProducts = serverResponse.data;
       const localProductsMap = new Map(products.map(p => [p.ASIN, p]));
       
@@ -187,6 +192,7 @@ const App: React.FC = () => {
     } else {
       processedProducts = [...products]; // Use local data on error
       const fullErrorMessage = `Fehler beim Laden der Produkte vom Server: ${serverResponse.message || 'Unbekannter Fehler.'} Lokale Daten werden beibehalten.`;
+      console.warn('Server product load failed', serverResponse);
       setFeedbackMessage({ text: fullErrorMessage, type: 'error' });
       
       if (serverResponse.message && serverResponse.message.toLowerCase().includes('failed to fetch')) {
@@ -200,7 +206,9 @@ const App: React.FC = () => {
 
     // Apply Teilwert V2 data if setting is active
     if (euerSettings.useTeilwertV2 && apiToken) {
+        console.log('Fetching Teilwert V2 data...');
         const teilwertV2Response = await apiGetTeilwertV2Data(apiToken);
+        console.log('Teilwert V2 response', teilwertV2Response);
         if (teilwertV2Response.status === 'success' && teilwertV2Response.data) {
             const teilwertV2Map = new Map<string, number>();
             for (const asinKey in teilwertV2Response.data) {
@@ -213,27 +221,32 @@ const App: React.FC = () => {
                     console.warn(`Fehler beim Parsen der Teilwert V2 Daten für ASIN ${asinKey}:`, e);
                 }
             }
-            
+            let appliedCount = 0;
             processedProducts = processedProducts.map(p => {
                 const v2Teilwert = teilwertV2Map.get(p.ASIN);
-                if (v2Teilwert !== undefined) { // V2 data exists for this ASIN
+                if (v2Teilwert !== undefined) {
+                    appliedCount++;
+                    console.log(`ASIN ${p.ASIN} - using Teilwert V2:`, v2Teilwert);
                     return {
                         ...p,
                         teilwert: v2Teilwert,
                         pdf: `https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/XBhdyIB8tZZK2IOWzPl4GKJ5_AoHTeFHIHoTbAk8k6ypbRugFOzMxLeUeCSYz96-/n/frlwfg9yseap/b/bucket-20240714-1645/o/Teilwert_v2_${p.ASIN}.pdf`,
                     };
-                } else { // V2 data does NOT exist for this ASIN, but useTeilwertV2 is ON
+                } else {
+                    console.log(`ASIN ${p.ASIN} - no Teilwert V2 data, clearing`);
                     return {
                         ...p,
-                        teilwert: null, // "Forget" old Teilwert
-                        pdf: undefined, // "Forget" old PDF
+                        teilwert: null,
+                        pdf: undefined,
                     };
                 }
             });
+            console.log(`Teilwert V2 applied for ${appliedCount} of ${processedProducts.length} products`);
             setFeedbackMessage({ text: `Produktdaten synchronisiert. Teilwert V2 Daten angewendet.`, type: 'success' });
         } else if (teilwertV2Response.status === 'error') {
             setFeedbackMessage({ text: `Warnung: Konnte Teilwert V2 Daten nicht laden: ${teilwertV2Response.message}. Bestehende Teilwerte werden verwendet oder ggf. genullt.`, type: 'info' });
              // If Teilwert V2 fetch fails but setting is on, nullify existing Teilwerts as per "forget" logic
+            console.warn('Teilwert V2 fetch failed', teilwertV2Response.message);
             processedProducts = processedProducts.map(p => ({
                 ...p,
                 teilwert: null,
@@ -249,6 +262,7 @@ const App: React.FC = () => {
 
     const sortedFinalProducts = processedProducts.sort((a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
     setProducts(sortedFinalProducts);
+    console.log('Final products after load', sortedFinalProducts.map(p => ({ ASIN: p.ASIN, teilwert: p.teilwert, pdf: p.pdf })));
     
     if (serverResponse.status === 'success' && !euerSettings.useTeilwertV2) { // If V2 wasn't even attempted.
         setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${sortedFinalProducts.length} Produkte).`, type: 'success' });
@@ -261,6 +275,7 @@ const App: React.FC = () => {
 
   const setEuerSettings = (newSettings: EuerSettings | ((prevState: EuerSettings) => EuerSettings)) => {
     const oldSettings = euerSettings;
+    console.log('setEuerSettings called', { oldUseV2: oldSettings.useTeilwertV2, newSettings });
     setEuerSettingsState(prevSettings => {
         const updatedSettings = typeof newSettings === 'function' ? newSettings(prevSettings) : newSettings;
         
@@ -275,6 +290,7 @@ const App: React.FC = () => {
         }
         if (updatedSettings.useTeilwertV2 !== oldSettings.useTeilwertV2) {
             needsReload = true;
+            console.log('useTeilwertV2 changed', { from: oldSettings.useTeilwertV2, to: updatedSettings.useTeilwertV2 });
             setFeedbackMessage({ text: `Teilwert V2 Daten ${updatedSettings.useTeilwertV2 ? 'aktiviert' : 'deaktiviert'}. Lade Daten neu...`, type: 'info' });
         }
 
@@ -301,6 +317,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    console.log('useEffect reload triggered', { hasToken: !!apiToken, useTeilwertV2: euerSettings.useTeilwertV2, ignoreETVZero: euerSettings.ignoreETVZeroProducts });
     if (apiToken) { // Load data if token exists (initial or after change) or if settings that require reload change
         loadProductData();
     } else {
