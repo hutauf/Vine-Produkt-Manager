@@ -209,7 +209,7 @@ const App: React.FC = () => {
         console.log('Fetching Teilwert V2 data...');
         const teilwertV2Response = await apiGetTeilwertV2Data(apiToken);
         console.log('Teilwert V2 response', teilwertV2Response);
-        if (teilwertV2Response.status === 'success' && teilwertV2Response.data) {
+        if (teilwertV2Response && teilwertV2Response.data) {
             const teilwertV2Map = new Map<string, number>();
             for (const asinKey in teilwertV2Response.data) {
                 try {
@@ -252,6 +252,8 @@ const App: React.FC = () => {
                 teilwert: null,
                 pdf: undefined,
             }));
+        } else {
+            console.warn('Unexpected Teilwert V2 response structure', teilwertV2Response);
         }
     }
     
