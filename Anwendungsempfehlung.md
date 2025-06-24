@@ -37,7 +37,10 @@ Du entscheidest selbst, wie viel Aufwand du betreiben möchtest. Die Anwendung f
 
 ## 8. Weitere Infos
 
-folgt
+- Es liegt im Dashboard ein großer Fokus auf einem Gewerbe mit Verkaufsintention der Vine-Produkte. Das hat steuerrechtliche Gründe. Wie sicher alle wissen, ist die Einschätzung, ob eine Sachzuwendung beim Empfänger als geldwerter Vorteil gewertet wird, insgesamt eine Grauzone und auch die Rechtsprechung ändert dort auch mal ihre Meinung (siehe beispielsweise BFH-Urteil 18.8.2005 - VI R 32/03). Meiner Ansicht nach kann es fraglich sein, wenn du ein Produkt bestellst *um* es privat zu nutzen. Denn dann ist der Zweck der Bestellung die private Nutzung, somit könnte das Finanzamt argumentieren, dass du den Produkttest selbst nicht als Aufwand geltend machen kannst. Wenn du das Produkt jedoch bestellst, *um* es später zu verkaufen, dann ist der Zweck der Bestellung ein betrieblich bedingter. Du kannst das Produkt dann wahlweise steuerneutral einlagern oder später irgendwann verkaufen. Solltest du deine Meinung ändern und das Produkt doch nutzen wollen, dann entnimmst du das Produkt zu diesem Zeitpunkt privat, was steuerrechtlich mit dem Teilwert bewertet wird, also jetzt kann man eigentlich nicht mehr mit dem Fremdvergleich argumentieren, weil wir weg vom §8 EStG sind. Außerdem wird der Entnahmepreis wie bei anderen Verkäufern bewertet und auch dann wäre ein Wiederbeschaffungswert (für uns worst case) nur als Einkaufspreis zu bewerten und nicht mit dem möglichen Verkaufspreis.
+- Teilwert v2 (Einstellungen) ist derzeit für euch ohne Funktion. Wird noch verändert.
+- Produkte, die eingelagert sind und erst im nächsten Jahr verkauft werden, werden derzeit nicht unterstützt.
+- Dass Produkte direkt mit dem Teilwert als Einnahme gebucht werden können, ist eine Vereinfachung, die zumindest von meinem Finanzamt akzeptiert wird. Das reduziert jedoch den Umsatz bezüglich der Kleinunternehmerregelung unrechtmäßig. Die Einkommenssteuer wird jedoch identisch berechnet.
 
 ---
 
