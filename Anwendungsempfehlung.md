@@ -2,29 +2,36 @@
 
 Diese kurze Anleitung beschreibt, wie der **Vine Produkt Manager** typischerweise eingesetzt wird und welche rechtlichen Rahmenbedingungen zu beachten sind. Im Vordergrund steht der Ablauf aus Sicht eines Vine Produkttesters, der eine Einnahmen-Überschuss-Rechnung (EÜR) erstellen muss.
 
-## 1. Datenimport
+## 1. Hosting
+
+Der **Vine Produkt Manager** ist eine statische Webseite, d.h. ihr könnt sie selbst hosten oder ihr nutzt mein Hosting: [Vine Produkt Manager](hutauf.github.io/vine-produkt-manager)
+
+Ihr könnt den **Vine Produkt Manager** dort einfach mal austesten - einfach in den Einstellungen mit einem Klick den Demo-Token laden, dann habt ihr Fake-Daten. Dort bitte keine persönlichen Daten hinterlegen, da sie mit dem Demo-Token auch ins Backend synchronisiert werden.
+
+
+## 2. Datenimport
 
 1. Exportiere deine Produktdaten mit dem [hutauf/VineTaxTools](https://github.com/hutauf/VineTaxTools/) Userscript. Du erhältst eine JSON-Datei mit allen relevanten Angaben.
 2. Lade diese Datei im Dashboard des Produkt Managers hoch. Solange kein API-Token hinterlegt ist, werden alle Informationen ausschließlich lokal im Browser gespeichert und verarbeitet.
 3. Optional kannst du einen Token von hutauf oder aus einem eigenen Backend hinterlegen. Dann erfolgt eine Synchronisation mit dem Server. Die Daten verbleiben dennoch lokal und lassen sich jederzeit manuell exportieren und später wieder importieren.
 
-## 2. Produktstatus festhalten
+## 3. Produktstatus festhalten
 
 Im Dashboard dokumentierst du, ob ein Produkt eingelagert, verkauft oder entsorgt wurde. Jede Änderung fließt automatisch in die EÜR ein. Verkäufe an Endkunden selbst werden nicht über den Produkt Manager abgewickelt – hier geht es nur um die steuerliche Erfassung.
 
-## 3. Teilwert oder ETV
+## 4. Teilwert oder ETV
 
 Für die Bewertung deiner Produkte kannst du zwischen dem **Teilwert** (geschätzter Wiederbeschaffungswert) und dem **ETV** (Estimated Tax Value) wählen. Je nach Einstellung bildet der Produkt Manager damit die Einnahmen und Ausgaben in der EÜR ab. Produkte mit ETV=0 lassen sich auf Wunsch global ausblenden.
 
-## 4. Automatisch erzeugte EÜR
+## 5. Automatisch erzeugte EÜR
 
 Sobald deine Daten importiert und der Produktstatus gepflegt ist, erstellt die Anwendung eine Übersicht der Einnahmen und Ausgaben. Du kannst jederzeit sehen, ob Produkte aktuell im Lager (Umlaufvermögen) oder im Betriebsvermögen (Anlageverzeichnis) geführt werden und wie sich Verkäufe oder Entnahmen auswirken.
 
-## 5. Belege exportieren
+## 6. Belege exportieren
 
 Um die Daten GoBD-konform in ein externes Buchhaltungsprogramm (z. B. Lexware Office) zu übernehmen, bietet der Produkt Manager einen Beleg-Export. Dabei werden Proforma-Rechnungen generiert, die zeitnah in deiner Buchhaltungssoftware festgeschrieben werden sollten.
 
-## 6. Flexibler Datenfluss
+## 7. Flexibler Datenfluss
 
 Du entscheidest selbst, wie viel Aufwand du betreiben möchtest. Die Anwendung funktioniert komplett offline, wenn du keinen Token nutzt. Mit Token synchronisierst du zusätzlich mit dem Server. In jedem Fall behältst du die Möglichkeit, alle Daten zu exportieren und später wieder zu importieren.
 
