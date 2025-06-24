@@ -4,7 +4,7 @@ Diese kurze Anleitung beschreibt, wie der **Vine Produkt Manager** typischerweis
 
 ## 1. Hosting
 
-Der **Vine Produkt Manager** ist eine statische Webseite, d.h. ihr könnt sie selbst hosten oder ihr nutzt mein Hosting: [Vine Produkt Manager](hutauf.github.io/vine-produkt-manager)
+Der **Vine Produkt Manager** ist eine statische Webseite, d.h. ihr könnt sie selbst hosten oder ihr nutzt mein Hosting: [Vine Produkt Manager](https://hutauf.github.io/vine-produkt-manager)
 
 Ihr könnt den **Vine Produkt Manager** dort einfach mal austesten - einfach in den Einstellungen mit einem Klick den Demo-Token laden, dann habt ihr Fake-Daten. Dort bitte keine persönlichen Daten hinterlegen, da sie mit dem Demo-Token auch ins Backend synchronisiert werden.
 
