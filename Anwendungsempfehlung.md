@@ -17,15 +17,11 @@ Ihr könnt den **Vine Produkt Manager** dort einfach mal austesten - einfach in 
 
 ## 3. Produktstatus festhalten
 
-Im Dashboard dokumentierst du, ob ein Produkt eingelagert, verkauft oder entsorgt wurde. Jede Änderung fließt automatisch in die EÜR ein. Verkäufe an Endkunden selbst werden nicht über den Produkt Manager abgewickelt – hier geht es nur um die steuerliche Erfassung.
-
-## 4. Teilwert oder ETV
-
-Für die Bewertung deiner Produkte kannst du zwischen dem **Teilwert** (geschätzter Wiederbeschaffungswert) und dem **ETV** (Estimated Tax Value) wählen. Je nach Einstellung bildet der Produkt Manager damit die Einnahmen und Ausgaben in der EÜR ab. Produkte mit ETV=0 lassen sich auf Wunsch global ausblenden.
+Im Dashboard dokumentierst du, ob ein Produkt eingelagert, verkauft oder entsorgt wurde. Jede Änderung fließt automatisch in die EÜR ein.
 
 ## 5. Automatisch erzeugte EÜR
 
-Sobald deine Daten importiert und der Produktstatus gepflegt ist, erstellt die Anwendung eine Übersicht der Einnahmen und Ausgaben. Du kannst jederzeit sehen, ob Produkte aktuell im Lager (Umlaufvermögen) oder im Betriebsvermögen (Anlageverzeichnis) geführt werden und wie sich Verkäufe oder Entnahmen auswirken.
+Die Anwendung erstellt eine Übersicht der Einnahmen und Ausgaben. Du kannst jederzeit sehen, ob Produkte aktuell im Lager (Umlaufvermögen) oder im Betriebsvermögen (Anlageverzeichnis) geführt werden und wie sich Verkäufe oder Entnahmen auswirken.
 
 ## 6. Belege exportieren
 
@@ -33,7 +29,7 @@ Um die Daten GoBD-konform in ein externes Buchhaltungsprogramm (z. B. Lexware 
 
 ## 7. Flexibler Datenfluss
 
-Du entscheidest selbst, wie viel Aufwand du betreiben möchtest. Die Anwendung funktioniert komplett offline, wenn du keinen Token nutzt. Mit Token synchronisierst du zusätzlich mit dem Server. In jedem Fall behältst du die Möglichkeit, alle Daten zu exportieren und später wieder zu importieren.
+Du entscheidest selbst, wie viel Aufwand du betreiben möchtest. Die Anwendung funktioniert komplett offline, wenn du keinen Token nutzt. Mit Token synchronisierst du zusätzlich mit dem Server. In jedem Fall behältst du die Möglichkeit, alle Daten zu exportieren und später wieder zu importieren. Du kannst du Anwendung einmal im Jahr zur Aufbereitung der Amazon-Produktliste nutzen oder auch täglich. Nach gobd müssen alle Buchungen unverzüglich erfolgen, aber gängige Praxis bei kleinen Unternehmen ist, solche Belege nur einmal im Jahr zu archivieren und damit die EÜR zu berechnen.
 
 ---
 
