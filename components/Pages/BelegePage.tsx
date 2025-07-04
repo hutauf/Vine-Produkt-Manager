@@ -354,7 +354,14 @@ const BelegePage: React.FC<BelegePageProps> = ({
                 <div className="text-xs text-gray-400 mt-1">
                   Bestellt: {p.date} 
                   {!forBulkSelection && <> | RN: <span className="font-semibold">{displayInvoiceNumber || (p.festgeschrieben === 1 ? 'N/A (Archiviert)' : 'Wird generiert...')}</span></>}
-                  {forBulkSelection && <> | Wert: {(euerSettings.useTeilwertForIncome ? (p.myTeilwert ?? p.teilwert) : p.etv).toFixed(2)}€</>}
+                  {forBulkSelection && (() => {
+                    const displayValue = euerSettings.useTeilwertForIncome
+                      ? p.myTeilwert ?? p.teilwert
+                      : p.etv;
+                    return (
+                      <> | Wert: {displayValue != null ? `${displayValue.toFixed(2)}€` : 'Teilwert fehlt'}</>
+                    );
+                  })()}
                 </div>
               </div>
             </li>

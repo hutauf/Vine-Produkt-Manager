@@ -13,7 +13,11 @@ export const generateBelegTextForPdf = (
   }
 
   const { userData, recipientData } = belegSettings;
-  const actualBelegValue = product.myTeilwert ?? product.teilwert ?? 0; // <--- MODIFIED HERE
+  const actualBelegValueSource = euerSettings.useTeilwertForIncome ? (product.myTeilwert ?? product.teilwert) : product.etv;
+  if (euerSettings.useTeilwertForIncome && actualBelegValueSource == null) {
+    return `Fehler: Teilwert für Produkt ${product.ASIN} fehlt.`;
+  }
+  const actualBelegValue = actualBelegValueSource as number;
   
   if (!invoiceNumberToUse && product.festgeschrieben !== 1) {
     console.warn("generateBelegTextForPdf called for non-festgeschrieben product without invoiceNumberToUse for ASIN:", product.ASIN);
@@ -116,17 +120,22 @@ export const generateBulkBelegTextForPdf = (
   text += `Schreiben von Rezensionen für die nachfolgend genannten Produkte im Rahmen des Amazon Vine Programms.\n\n`;
   
   text += `Abgerechnete Produkte:\n`;
+  if (euerSettings.useTeilwertForIncome) {
+    for (const p of selectedProducts) {
+      if (p.myTeilwert == null && p.teilwert == null) {
+        return `Fehler: Teilwert für Produkt ${p.ASIN} fehlt.`;
+      }
+    }
+  }
+
   let totalValue = 0;
   selectedProducts.forEach(p => {
-    let EinzelwertForBeleg: number;
-    if (euerSettings.useTeilwertForIncome) {
-        EinzelwertForBeleg = p.myTeilwert ?? p.teilwert ?? 0; // <--- MODIFIED HERE
-    } else {
-        EinzelwertForBeleg = p.etv;
-    }
+    const EinzelwertForBeleg = euerSettings.useTeilwertForIncome
+      ? (p.myTeilwert ?? p.teilwert!)
+      : p.etv;
     totalValue += EinzelwertForBeleg;
     text += `- Produkt: ${p.name.substring(0, 50)}${p.name.length > 50 ? '...' : ''} (ASIN: ${p.ASIN})\n`;
-    text += `  Bestelldatum: ${p.date}, Einzelwert: ${EinzelwertForBeleg.toFixed(2)} EUR\n`; // <--- MODIFIED HERE
+    text += `  Bestelldatum: ${p.date}, Einzelwert: ${EinzelwertForBeleg.toFixed(2)} EUR\n`;
   });
   text += `\n`;
 
