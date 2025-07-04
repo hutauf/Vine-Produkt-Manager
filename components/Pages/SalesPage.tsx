@@ -3,6 +3,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Product, ProductUsage, EuerSettings, BelegSettings, SalesPageProps } from '../../types';
 import EditProductModal from '../Products/EditProductModal';
 import SalesPlots from '../Sales/SalesPlots'; // Import the new SalesPlots component
+import UsagePieCharts from '../Sales/UsagePieCharts';
 import { FaDollarSign, FaEdit, FaSort, FaSortUp, FaSortDown, FaTimesCircle, FaFilter } from 'react-icons/fa';
 import Button from '../Common/Button';
 import { parseDMYtoDate, parseGermanDate } from '../../utils/dateUtils';
@@ -134,7 +135,11 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
         </div>
         <SalesPlots soldProducts={allSoldProducts} selectedYear={selectedPlotYear} />
       </div>
-    
+
+      <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
+        <UsagePieCharts products={products} selectedYear={selectedPlotYear} />
+      </div>
+
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
         <h3 className="text-xl font-semibold text-gray-100 mb-4">
           Verkaufte Produkte ({selectedPlotYear === 'all' ? 'Alle Jahre' : selectedPlotYear}): {filteredSoldProductsForTableAndPlots.length}
