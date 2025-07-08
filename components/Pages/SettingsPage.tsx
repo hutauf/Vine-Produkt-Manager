@@ -233,7 +233,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           <div className="pt-4 border-t border-slate-600">
               <h4 className="text-md font-medium text-red-300 mb-1">Backend API URL (Primäre Produktdatenbank)</h4>
               <p className="text-sm text-gray-400 mb-2">
-                  URL für die Haupt-Produktdatenbank (<code>data_operations</code>). Die URL für Teilwert v2 (<code>api/get_all</code>) ist fest codiert.
+                  URL für die Haupt-Produktdatenbank (<code>data_operations</code>). Die URL für Teilwert v2 (<code>kv/get_all</code>) ist fest codiert.
               </p>
               <input
                 type="text"
