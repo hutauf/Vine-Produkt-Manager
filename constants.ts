@@ -67,6 +67,5 @@ export const DEFAULT_API_BASE_URL = "https://hutaufvine.pythonanywhere.com/data_
 // We'll handle this directly in the apiService for v2 calls, or assume it's the same base and only `database` differs.
 // For simplicity, assuming the provided DEFAULT_API_BASE_URL is for the primary product DB.
 // The new v2 database URL structure is "http://138.2.161.49:6969/kv/get_all". We will use this directly.
-export const TEILWERT_V2_API_URL = "http://138.2.161.49:6969/kv/get_all";
-
+export const TEILWERT_V2_API_URL = "https://genuine-painfully-rattler.ngrok-free.app/kv/get_all";
 export const API_BASE_URL_STORAGE_KEY = 'vineApp_apiBaseUrl';export const ADDITIONAL_EXPENSES_STORAGE_KEY = 'vineApp_additionalExpenses';

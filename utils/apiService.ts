@@ -55,9 +55,10 @@ async function fetchApiPost<T = any>(fullUrl: string, bodyPayload: any): Promise
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': '69420',
       },
       body: JSON.stringify(bodyPayload),
-      mode: 'cors', 
+      mode: 'cors',
     });
 
     if (!response.ok) {
