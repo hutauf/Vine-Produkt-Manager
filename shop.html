@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Showcase</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div id="app"></div>
+
+  <script>
+    /* ============================
+       ─── CONFIG & DATA ──────────
+    =============================*/
+    const config = {
+      recipientEmail: 'produktanfrage@hutauf.org'
+    };
+
+    const productData = [
+      {
+        asin: 'B000KPW1B6',
+        name: 'TechniSat 12 V‑Anschlusskabel für Zigarettenanzünder',
+        full_price: 5.0,
+        reduced_price: 4.0,
+        img_url: 'https://m.media-amazon.com/images/I/71tUSPk-zoL._AC_SL500_.jpg'
+      },
+      {
+        asin: 'B07DPCGNZM',
+        name: 'Yibuy 4 x Eiche Holz Oblique konisch Möbel Bein 10 cm',
+        full_price: 10.99,
+        reduced_price: 5.99,
+        img_url: 'https://m.media-amazon.com/images/I/7142Kp-F7lL._AC_SL500_.jpg'
+      },
+      {
+        asin: 'B08H93ZRK9',
+        name: 'Anker USB‑C Ladegerät 65 W',
+        full_price: 54.99,
+        img_url: 'https://m.media-amazon.com/images/I/61jSn+wRqkL._AC_SL1500_.jpg'
+      },
+      {
+        asin: 'B09B1W2X38',
+        name: 'Logitech MX Master 3S',
+        full_price: 129.99,
+        reduced_price: 99.99,
+        img_url: 'https://m.media-amazon.com/images/I/61xVB25aVFL._AC_SL1500_.jpg'
+      },
+      {
+        asin: 'B07YWHQJCM',
+        name: 'Samsung Odyssey G9 49‑Zoll Gaming‑Monitor',
+        full_price: 1499.0,
+        reduced_price: 1199.0,
+        img_url: 'https://m.media-amazon.com/images/I/61Sq3NCMk3L._AC_SL1500_.jpg'
+      },
+      {
+        asin: 'B08324814W',
+        name: 'Elgato Stream Deck (15 Tasten)',
+        full_price: 149.99,
+        img_url: 'https://m.media-amazon.com/images/I/710R9Y4bLsL._AC_SL1500_.jpg'
+      }
+    ];
+
+    /* ============================
+       ─── STATE ──────────────────
+    =============================*/
+    const state = {
+      view: 'products', // 'products' | 'cart'
+      cart: [], // array of products
+      sort: 'name' // 'name' | 'price-asc' | 'price-desc'
+    };
+
+    /* ============================
+       ─── RENDER HELPERS ─────────
+    =============================*/
+    const $ = (html) => {
+      const template = document.createElement('template');
+      template.innerHTML = html.trim();
+      return template.content.firstChild;
+    };
+
+    const formatPrice = (value) => value.toFixed(2).replace('.', ',') + ' €';
+
+    /* ============================
+       ─── HEADER ─────────────────
+    =============================*/
+    function renderHeader() {
+      return $(
+        `<header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-20">
+          <nav class="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <button id="btn-home" class="flex items-center gap-3 text-xl md:text-2xl font-bold text-gray-800 hover:text-blue-600 transition-colors">
+              🏠 <span class="hidden sm:inline">Produkt‑Shop</span>
+            </button>
+            <button id="btn-cart" class="relative flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 rounded-full hover:bg-gray-100 transition-colors">
+              🛒 <span class="hidden md:inline font-medium">Warenkorb</span>
+              ${state.cart.length > 0 ? `<span class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">${state.cart.length}</span>` : ''}
+            </button>
+          </nav>
+        </header>`
+      );
+    }
+
+    /* ============================
+       ─── PRODUCT LIST ───────────
+    =============================*/
+    function renderProductCard(product) {
+      const hasDiscount = typeof product.reduced_price === 'number' && product.reduced_price < product.full_price;
+      const discountPercentage = hasDiscount ? Math.round(((product.full_price - product.reduced_price) / product.full_price) * 100) : 0;
+      const priceToShow = hasDiscount ? product.reduced_price : product.full_price;
+
+      const card = $(
+        `<div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col group transition hover:shadow-xl hover:scale-[1.02]">
+          <div class="relative">
+            <div class="w-full h-56 bg-white flex items-center justify-center p-4">
+              <img src="${product.img_url}" alt="${product.name}" class="max-w-full max-h-full object-contain"/>
+            </div>
+            ${hasDiscount ? `<span class="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg">-${discountPercentage}%</span>` : ''}
+          </div>
+          <div class="p-4 flex flex-col h-full">
+            <h3 class="text-gray-800 font-semibold text-sm mb-2 flex-grow min-h-[3rem]">${product.name}</h3>
+            <div class="mt-auto">
+              <div class="flex items-baseline justify-end gap-2 mb-3">
+                ${hasDiscount ? `<p class="text-gray-400 line-through text-md">${formatPrice(product.full_price)}</p>` : ''}
+                <p class="text-gray-900 font-bold text-2xl">${formatPrice(priceToShow)}</p>
+              </div>
+              <a href="https://amazon.de/dp/${product.asin}" target="_blank" rel="noopener noreferrer" class="block text-center text-blue-600 hover:underline text-sm mb-4">Details anzeigen</a>
+              <button data-add-asin="${product.asin}" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center transition-colors">
+                🛒 In den Warenkorb
+              </button>
+            </div>
+          </div>
+        </div>`
+      );
+      return card;
+    }
+
+    function sortProducts(products) {
+      switch (state.sort) {
+        case 'price-asc':
+          return [...products].sort((a, b) => (a.reduced_price ?? a.full_price) - (b.reduced_price ?? b.full_price));
+        case 'price-desc':
+          return [...products].sort((a, b) => (b.reduced_price ?? b.full_price) - (a.reduced_price ?? a.full_price));
+        case 'name':
+        default:
+          return [...products].sort((a, b) => a.name.localeCompare(b.name));
+      }
+    }
+
+    function renderProductList() {
+      const available = productData.filter(p => !state.cart.some(c => c.asin === p.asin));
+      const sorted = sortProducts(available);
+
+      if (sorted.length === 0) {
+        return $(
+          `<div class="text-center py-16">
+            <h2 class="text-xl font-semibold text-gray-700">Alle Produkte sind im Warenkorb!</h2>
+            <p class="text-gray-500 mt-2">Sehen Sie sich Ihren Warenkorb an, um eine Anfrage zu senden.</p>
+          </div>`
+        );
+      }
+
+      const listContainer = $(
+        `<div>
+          <div class="mb-6 flex justify-between items-center">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Unsere Produkte</h1>
+            <div class="flex items-center gap-2">
+              <label for="sortSelect" class="text-gray-600 font-medium text-sm">Sortieren:</label>
+              <select id="sortSelect" class="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500">
+                <option value="name">Name</option>
+                <option value="price-asc">Preis (aufsteigend)</option>
+                <option value="price-desc">Preis (absteigend)</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6" id="productGrid"></div>
+        </div>`
+      );
+
+      // set current sort
+      listContainer.querySelector('#sortSelect').value = state.sort;
+      listContainer.querySelector('#sortSelect').addEventListener('change', (e) => {
+        state.sort = e.target.value;
+        render();
+      });
+
+      const grid = listContainer.querySelector('#productGrid');
+      sorted.forEach(p => grid.appendChild(renderProductCard(p)));
+
+      return listContainer;
+    }
+
+    /* ============================
+       ─── CART VIEW ─────────────
+    =============================*/
+    function createMailtoLink() {
+      const subject = 'Produktanfrage';
+      const bodyHeader = 'Ich habe Interesse an diesen Produkten:%0D%0A%0D%0A';
+      const list = state.cart.map(item => {
+        const price = item.reduced_price ?? item.full_price;
+        return `${item.name} (${price.toFixed(2)} €)`;
+      }).join('%0D%0A');
+      return `mailto:${config.recipientEmail}?subject=${encodeURIComponent(subject)}&body=${bodyHeader + list}`;
+    }
+
+    function renderCartView() {
+      if (state.cart.length === 0) {
+        return $(
+          `<div class="text-center bg-white p-12 rounded-lg shadow-md">
+            <div class="text-gray-400 mx-auto text-6xl">🛒</div>
+            <h2 class="text-2xl font-bold text-gray-800 mt-4">Ihr Warenkorb ist leer</h2>
+            <p class="text-gray-500 mt-2">Fügen Sie Produkte hinzu, um sie hier zu sehen.</p>
+            <button id="btn-back-products" class="mt-6 bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700 transition-colors">Zurück zu den Produkten</button>
+          </div>`
+        );
+      }
+
+      const container = $(
+        `<div class="bg-white p-6 sm:p-8 rounded-lg shadow-lg">
+          <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mb-6">Ihr Warenkorb</h1>
+          <div id="cartItems" class="divide-y divide-gray-200"></div>
+          <div class="mt-8 border-t border-gray-200 pt-6">
+            <div class="flex justify-between items-center text-xl font-bold mb-6">
+              <span>Gesamtsumme:</span>
+              <span id="totalPrice"></span>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-4">
+              <button id="btn-continue" class="w-full sm:w-auto flex-1 bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg hover:bg-gray-300">Weiter einkaufen</button>
+              <a id="btn-mail" class="w-full sm:w-auto flex-1 bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600 text-center" href="#">Anfrage senden</a>
+            </div>
+          </div>
+        </div>`
+      );
+
+      // populate items
+      const itemsDiv = container.querySelector('#cartItems');
+      state.cart.forEach(item => {
+        const itemEl = $(
+          `<div class="py-4 flex items-center justify-between gap-4">
+            <img src="${item.img_url}" alt="${item.name}" class="w-16 h-16 object-contain rounded-md bg-gray-100 p-1" />
+            <div class="flex-grow">
+              <p class="font-semibold text-gray-800 text-sm sm:text-base">${item.name}</p>
+              <p class="text-gray-600 font-bold text-lg mt-1">${formatPrice(item.reduced_price ?? item.full_price)}</p>
+            </div>
+            <button data-remove-asin="${item.asin}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-gray-100">🗑️</button>
+          </div>`
+        );
+        itemsDiv.appendChild(itemEl);
+      });
+
+      // total price
+      const total = state.cart.reduce((acc, p) => acc + (p.reduced_price ?? p.full_price), 0);
+      container.querySelector('#totalPrice').textContent = formatPrice(total);
+
+      // mailto link
+      container.querySelector('#btn-mail').href = createMailtoLink();
+
+      return container;
+    }
+
+    /* ============================
+       ─── MAIN RENDER FUNCTION ───
+    =============================*/
+    function render() {
+      const app = document.getElementById('app');
+      app.innerHTML = '';
+
+      // Header
+      const header = renderHeader();
+      app.appendChild(header);
+
+      // Main content
+      const main = document.createElement('main');
+      main.className = 'container mx-auto p-4 sm:p-6 lg:p-8';
+      main.appendChild(state.view === 'products' ? renderProductList() : renderCartView());
+      app.appendChild(main);
+
+      // Footer
+      const footer = $(
+        `<footer class="text-center p-4 text-gray-500 text-sm">
+          <p>Product Showcase</p>
+        </footer>`
+      );
+      app.appendChild(footer);
+
+      attachGlobalEvents();
+    }
+
+    /* ============================
+       ─── EVENT HANDLERS ─────────
+    =============================*/
+    function attachGlobalEvents() {
+      // header buttons
+      const btnHome = document.getElementById('btn-home');
+      if (btnHome) btnHome.onclick = () => { state.view = 'products'; render(); };
+
+      const btnCart = document.getElementById('btn-cart');
+      if (btnCart) btnCart.onclick = () => { state.view = 'cart'; render(); };
+
+      // product add buttons
+      document.querySelectorAll('[data-add-asin]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const asin = btn.getAttribute('data-add-asin');
+          const product = productData.find(p => p.asin === asin);
+          if (product && !state.cart.find(i => i.asin === asin)) {
+            state.cart.push(product);
+            render();
+          }
+        });
+      });
+
+      // cart remove buttons
+      document.querySelectorAll('[data-remove-asin]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const asin = btn.getAttribute('data-remove-asin');
+          state.cart = state.cart.filter(p => p.asin !== asin);
+          render();
+        });
+      });
+
+      // continue shopping & back buttons
+      const backBtn = document.getElementById('btn-back-products');
+      if (backBtn) backBtn.onclick = () => { state.view = 'products'; render(); };
+
+      const continueBtn = document.getElementById('btn-continue');
+      if (continueBtn) continueBtn.onclick = () => { state.view = 'products'; render(); };
+    }
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
