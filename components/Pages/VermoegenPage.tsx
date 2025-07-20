@@ -329,7 +329,6 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
       <div className="text-right mt-6">
         <Button onClick={() => setShowCreateModal(true)} disabled={selectedAsins.size === 0}>Shop erstellen</Button>
       </div>
-    </div>
     <CreateShopModal
       isOpen={showCreateModal}
       onClose={() => setShowCreateModal(false)}
