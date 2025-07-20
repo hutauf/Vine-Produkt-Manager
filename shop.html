@@ -15,51 +15,10 @@
        ─── CONFIG & DATA ──────────
     =============================*/
     const config = {
-      recipientEmail: 'produktanfrage@hutauf.org'
+      recipientEmail: __RECIPIENT_EMAIL__
     };
 
-    const productData = [
-      {
-        asin: 'B000KPW1B6',
-        name: 'TechniSat 12 V‑Anschlusskabel für Zigarettenanzünder',
-        full_price: 5.0,
-        reduced_price: 4.0,
-        img_url: 'https://m.media-amazon.com/images/I/71tUSPk-zoL._AC_SL500_.jpg'
-      },
-      {
-        asin: 'B07DPCGNZM',
-        name: 'Yibuy 4 x Eiche Holz Oblique konisch Möbel Bein 10 cm',
-        full_price: 10.99,
-        reduced_price: 5.99,
-        img_url: 'https://m.media-amazon.com/images/I/7142Kp-F7lL._AC_SL500_.jpg'
-      },
-      {
-        asin: 'B08H93ZRK9',
-        name: 'Anker USB‑C Ladegerät 65 W',
-        full_price: 54.99,
-        img_url: 'https://m.media-amazon.com/images/I/61jSn+wRqkL._AC_SL1500_.jpg'
-      },
-      {
-        asin: 'B09B1W2X38',
-        name: 'Logitech MX Master 3S',
-        full_price: 129.99,
-        reduced_price: 99.99,
-        img_url: 'https://m.media-amazon.com/images/I/61xVB25aVFL._AC_SL1500_.jpg'
-      },
-      {
-        asin: 'B07YWHQJCM',
-        name: 'Samsung Odyssey G9 49‑Zoll Gaming‑Monitor',
-        full_price: 1499.0,
-        reduced_price: 1199.0,
-        img_url: 'https://m.media-amazon.com/images/I/61Sq3NCMk3L._AC_SL1500_.jpg'
-      },
-      {
-        asin: 'B08324814W',
-        name: 'Elgato Stream Deck (15 Tasten)',
-        full_price: 149.99,
-        img_url: 'https://m.media-amazon.com/images/I/710R9Y4bLsL._AC_SL1500_.jpg'
-      }
-    ];
+    const productData = __PRODUCT_DATA__;
 
     /* ============================
        ─── STATE ──────────────────
@@ -67,7 +26,8 @@
     const state = {
       view: 'products', // 'products' | 'cart'
       cart: [], // array of products
-      sort: 'name' // 'name' | 'price-asc' | 'price-desc'
+      sort: 'name', // 'name' | 'price-asc' | 'price-desc'
+      imageIndices: {}
     };
 
     /* ============================
@@ -108,12 +68,14 @@
       const discountPercentage = hasDiscount ? Math.round(((product.full_price - product.reduced_price) / product.full_price) * 100) : 0;
       const priceToShow = hasDiscount ? product.reduced_price : product.full_price;
 
+      const currentIndex = state.imageIndices[product.asin] || 0;
       const card = $(
         `<div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col group transition hover:shadow-xl hover:scale-[1.02]">
           <div class="relative">
             <div class="w-full h-56 bg-white flex items-center justify-center p-4">
-              <img src="${product.img_url}" alt="${product.name}" class="max-w-full max-h-full object-contain"/>
+              <img data-asin="${product.asin}" src="${product.image_urls[currentIndex]}" alt="${product.name}" class="max-w-full max-h-full object-contain"/>
             </div>
+            ${product.image_urls.length > 1 ? `<button data-dir="prev" data-asin="${product.asin}" class="absolute left-1 top-1/2 -translate-y-1/2 bg-white/70 rounded-full px-2">◀</button><button data-dir="next" data-asin="${product.asin}" class="absolute right-1 top-1/2 -translate-y-1/2 bg-white/70 rounded-full px-2">▶</button>` : ''}
             ${hasDiscount ? `<span class="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg">-${discountPercentage}%</span>` : ''}
           </div>
           <div class="p-4 flex flex-col h-full">
@@ -199,6 +161,7 @@
         const price = item.reduced_price ?? item.full_price;
         return `${item.name} (${price.toFixed(2)} €)`;
       }).join('%0D%0A');
+      if (!config.recipientEmail) return '#';
       return `mailto:${config.recipientEmail}?subject=${encodeURIComponent(subject)}&body=${bodyHeader + list}`;
     }
 
@@ -236,7 +199,7 @@
       state.cart.forEach(item => {
         const itemEl = $(
           `<div class="py-4 flex items-center justify-between gap-4">
-            <img src="${item.img_url}" alt="${item.name}" class="w-16 h-16 object-contain rounded-md bg-gray-100 p-1" />
+            <img src="${item.image_urls[0]}" alt="${item.name}" class="w-16 h-16 object-contain rounded-md bg-gray-100 p-1" />
             <div class="flex-grow">
               <p class="font-semibold text-gray-800 text-sm sm:text-base">${item.name}</p>
               <p class="text-gray-600 font-bold text-lg mt-1">${formatPrice(item.reduced_price ?? item.full_price)}</p>
@@ -305,6 +268,21 @@
             state.cart.push(product);
             render();
           }
+        });
+      });
+
+      document.querySelectorAll('[data-dir]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const asin = btn.getAttribute('data-asin');
+          const dir = btn.getAttribute('data-dir');
+          const product = productData.find(p => p.asin === asin);
+          if (!product) return;
+          const max = product.image_urls.length;
+          const index = state.imageIndices[asin] || 0;
+          const newIndex = dir === 'next' ? (index + 1) % max : (index - 1 + max) % max;
+          state.imageIndices[asin] = newIndex;
+          const img = document.querySelector(`img[data-asin="${asin}"]`);
+          if (img) img.src = product.image_urls[newIndex];
         });
       });
 
