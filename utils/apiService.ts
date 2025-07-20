@@ -233,5 +233,15 @@ export const apiGetTeilwertV2Data = async (token: string): Promise<ApiResponse<{
     request: "get_all" // Assuming "get_all" is the correct request type
   };
   // Using TEILWERT_V2_API_URL directly as per specification
-  return fetchApiPost<{[asin: string]: string}>(TEILWERT_V2_API_URL, body); 
+  return fetchApiPost<{[asin: string]: string}>(TEILWERT_V2_API_URL, body);
+};
+
+export const apiGetImages = async (asins: string[]): Promise<{[asin: string]: string[]}> => {
+  const resp = await fetch('/get_images', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ asins })
+  });
+  if (!resp.ok) throw new Error('failed to fetch images');
+  return resp.json();
 };

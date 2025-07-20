@@ -4,6 +4,9 @@ import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '..
 import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
 import Button from '../Common/Button';
+import CreateShopModal from '../Shop/CreateShopModal';
+import PublishedUrlModal from '../Shop/PublishedUrlModal';
+import { generateShopHtml } from '../../utils/shopGenerator';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
@@ -17,6 +20,9 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   const [newExpense, setNewExpense] = useState({ date: getTodayGermanFormat(), name: '', amount: '' });
   const [expenseDateError, setExpenseDateError] = useState<string | null>(null);
+  const [selectedAsins, setSelectedAsins] = useState<Set<string>>(new Set());
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
 
   const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0; // <--- MODIFIED HERE
 
@@ -188,8 +194,16 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
           <table className="min-w-full divide-y divide-slate-700">
             <thead className="bg-slate-750">
               <tr>
+                <th className="px-4 py-3">
+                  <input type="checkbox" checked={data.every(p => selectedAsins.has(p.ASIN))} onChange={e => {
+                    const set = new Set(selectedAsins);
+                    if (e.target.checked) data.forEach(p => set.add(p.ASIN));
+                    else data.forEach(p => set.delete(p.ASIN));
+                    setSelectedAsins(set);
+                  }} />
+                </th>
                 {productTableHeaders.map(header => (
-                   <th 
+                   <th
                         key={header.key}
                         onClick={() => handleProductSort(header.key)}
                         className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-slate-700">
@@ -201,6 +215,13 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
             <tbody className="bg-slate-800 divide-y divide-slate-700">
               {data.map(p => (
                 <tr key={p.ASIN} className="hover:bg-slate-750 transition-colors">
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedAsins.has(p.ASIN)} onChange={() => {
+                      const set = new Set(selectedAsins);
+                      if (set.has(p.ASIN)) set.delete(p.ASIN); else set.add(p.ASIN);
+                      setSelectedAsins(set);
+                    }} />
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-sky-400">{p.ASIN}</td>
                   <td className="px-4 py-3 text-sm text-gray-200 max-w-xs truncate" title={p.name}>{p.name}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatDate(p.orderDateObj)}</td>
@@ -305,6 +326,41 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
             </Button>
         </div>
       </div>
+      <div className="text-right mt-6">
+        <Button onClick={() => setShowCreateModal(true)} disabled={selectedAsins.size === 0}>Shop erstellen</Button>
+      </div>
+    </div>
+    <CreateShopModal
+      isOpen={showCreateModal}
+      onClose={() => setShowCreateModal(false)}
+      onSubmit={async opts => {
+        const selected = products.filter(p => selectedAsins.has(p.ASIN));
+        const html = await generateShopHtml(selected, {
+          email: opts.email,
+          percent: opts.percent,
+          reference: opts.reference,
+          showDiscount: opts.showDiscount
+        });
+        if (opts.publish) {
+          try {
+            const resp = await fetch('hutauf.org/upload_shop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(opts.name ? { html, name: opts.name } : { html })
+            });
+            const data = await resp.json();
+            setPublishedUrl(data.url);
+          } catch (e) {
+            alert('Fehler beim Hochladen');
+          }
+        } else {
+          document.open();
+          document.write(html);
+          document.close();
+        }
+      }}
+    />
+    <PublishedUrlModal url={publishedUrl || ''} isOpen={!!publishedUrl} onClose={() => setPublishedUrl(null)} />
     </div>
   );
 };
