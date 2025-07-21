@@ -342,7 +342,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
         });
         if (opts.publish) {
           try {
-            const resp = await fetch('hutauf.org/upload_shop', {
+            const resp = await fetch('https://hutauf.org/upload_shop', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(opts.name ? { html, name: opts.name } : { html })
