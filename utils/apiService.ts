@@ -237,7 +237,7 @@ export const apiGetTeilwertV2Data = async (token: string): Promise<ApiResponse<{
 };
 
 export const apiGetImages = async (asins: string[]): Promise<{[asin: string]: string[]}> => {
-  const resp = await fetch('/api/get_images', {
+  const resp = await fetch('/oracle2/api/get_images', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ asins })
