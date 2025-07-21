@@ -23,7 +23,11 @@ export async function generateShopHtml(products: Product[], options: ShopOptions
     const ref = options.reference === 'etv' ? p.etv : (p.myTeilwert ?? p.teilwert ?? 0);
     const target = ref * (options.percent / 100);
     const ids = imageData[p.ASIN] || [];
-    const urls = ids.map(id => `https://m.media-amazon.com/images/I/${id}._AC_500_.jpg`);
+    const urls = ids.map(id => 
+      id.length < 15 
+        ? `https://m.media-amazon.com/images/I/${id}._AC_500_.jpg` 
+        : id
+    );
     return {
       asin: p.ASIN,
       name: p.name,
