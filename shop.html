@@ -93,6 +93,8 @@
           </div>
         </div>`
       );
+      card.dataset.name = product.name.toLowerCase();
+      card.dataset.asin = product.asin.toLowerCase();
       return card;
     }
 
@@ -123,9 +125,10 @@
 
       const listContainer = $(
         `<div>
-          <div class="mb-6 flex justify-between items-center">
+          <div class="mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
             <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Unsere Produkte</h1>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <input id="searchInput" type="text" placeholder="Suche nach Titel oder ASIN" class="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500" />
               <label for="sortSelect" class="text-gray-600 font-medium text-sm">Sortieren:</label>
               <select id="sortSelect" class="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500">
                 <option value="name">Name</option>
@@ -263,6 +266,18 @@
 
       const btnCart = document.getElementById('btn-cart');
       if (btnCart) btnCart.onclick = () => { state.view = 'cart'; render(); };
+
+      const searchInput = document.getElementById('searchInput');
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          const term = searchInput.value.toLowerCase();
+          document.querySelectorAll('#productGrid > div').forEach(card => {
+            const name = card.dataset.name || '';
+            const asin = card.dataset.asin || '';
+            card.style.display = (name.includes(term) || asin.includes(term)) ? '' : 'none';
+          });
+        });
+      }
 
       // product add buttons
       document.querySelectorAll('[data-add-asin]').forEach(btn => {
