@@ -40,7 +40,8 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
   const euerData = useMemo(() => {
     let einnahmenAusVerkauf = 0;
     let einnahmenProduktzugang = 0;
-    
+    let einnahmenPrivatentnahme = 0;
+
     let ausgabenAnlagevermoegen = 0;
     let ausgabenUmlaufvermoegen = 0;
     const ausgabenHomeOffice = settings.homeOfficePauschale;
@@ -73,27 +74,17 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
         if (orderYear === selectedYear && !p.usageStatus.includes(ProductUsage.STORNIERT)) {
              einnahmenProduktzugang += wertETV;
         }
-        // Einnahmen Produktzugang (Teilwert bei Privatentnahme im Entnahmejahr)
+        // Einnahmen Privatentnahme (Teilwert im Entnahmejahr)
         const effectivePrivatentnahmeDate = getEffectivePrivatentnahmeDate(p, settings);
-        if (p.usageStatus.includes(ProductUsage.PRIVATENTNAHME) && 
-            effectivePrivatentnahmeDate && 
+        if (p.usageStatus.includes(ProductUsage.PRIVATENTNAHME) &&
+            effectivePrivatentnahmeDate &&
             effectivePrivatentnahmeDate.getFullYear().toString() === selectedYear) {
-          einnahmenProduktzugang += wertTeilwertEntnahme;
+          einnahmenPrivatentnahme += wertTeilwertEntnahme;
         }
 
-        // Ausgaben (ETV im Bestelljahr)
-        if (orderYear === selectedYear) {
-          if (p.usageStatus.includes(ProductUsage.BETRIEBLICHE_NUTZUNG)) {
-            ausgabenAnlagevermoegen += wertETV;
-          } else if (
-            p.usageStatus.includes(ProductUsage.LAGER) ||
-            p.usageStatus.includes(ProductUsage.ENTSORGT) ||
-            p.usageStatus.includes(ProductUsage.VERKAUFT) || // Expense part of sold item
-            p.usageStatus.includes(ProductUsage.PRIVATENTNAHME) // ETV expense part of private use
-          ) {
-            ausgabenUmlaufvermoegen += wertETV;
-          }
-          // Storniert & Defekt (ohne andere Hauptnutzung) haben keine Auswirkung
+        // Ausgaben (ETV im Bestelljahr) immer als Anlagevermögen
+        if (orderYear === selectedYear && !p.usageStatus.includes(ProductUsage.STORNIERT)) {
+          ausgabenAnlagevermoegen += wertETV;
         }
       } else { // Alte Methode
         const effectivePrivatentnahmeDate = getEffectivePrivatentnahmeDate(p, settings);
@@ -136,7 +127,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       })
       .reduce((sum, exp) => sum + exp.amount, 0);
 
-    const totalIncome = einnahmenAusVerkauf + einnahmenProduktzugang;
+    const totalIncome = einnahmenAusVerkauf + einnahmenProduktzugang + einnahmenPrivatentnahme;
     const totalOperationalExpenses = ausgabenAnlagevermoegen + ausgabenUmlaufvermoegen + ausgabenHomeOffice + ausgabenSonstigeBetriebsausgaben;
     const profit = totalIncome - totalOperationalExpenses;
 
@@ -144,6 +135,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       year: selectedYear,
       einnahmenAusVerkauf,
       einnahmenProduktzugang,
+      einnahmenPrivatentnahme,
       totalIncome,
       ausgabenAnlagevermoegen,
       ausgabenUmlaufvermoegen,
@@ -291,6 +283,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
                         <span className="text-gray-300">Produktzugänge (bewertet mit ETV/Teilwert):</span>
                         <span className="text-green-400">{formatCurrency(euerData.einnahmenProduktzugang)}</span>
                     </div>
+                    <div className="flex justify-between items-center"><span className="text-gray-300">Privatentnahmen:</span><span className="text-green-400">{formatCurrency(euerData.einnahmenPrivatentnahme)}</span></div>
                 </div>
             </div>
 
@@ -324,7 +317,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
             <p className="text-xs text-gray-400 mt-4 px-1">
                 <FaInfoCircle className="inline mr-1 mb-0.5"/>
                 Alternative EÜR-Methode aktiv:
-                Produktzugänge werden im Bestelljahr mit ETV als Einnahme gebucht. Ausgaben für Anlage-/Umlaufvermögen ebenfalls mit ETV im Bestelljahr.
+                Produktzugänge werden im Bestelljahr mit ETV als Einnahme gebucht. Ausgaben für Anlagevermögen ebenfalls mit ETV im Bestelljahr.
                 Bei Privatentnahme wird der Teilwert zusätzlich als Einnahme im Entnahmejahr erfasst.
             </p>
         ) : (
