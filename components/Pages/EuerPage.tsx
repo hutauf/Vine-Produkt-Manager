@@ -76,7 +76,8 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
         }
         // Einnahmen Privatentnahme (Teilwert im Entnahmejahr)
         const effectivePrivatentnahmeDate = getEffectivePrivatentnahmeDate(p, settings);
-        if (p.usageStatus.includes(ProductUsage.PRIVATENTNAHME) &&
+        if ((p.usageStatus.includes(ProductUsage.PRIVATENTNAHME) || !p.usageStatus.length) &&
+            !p.usageStatus.includes(ProductUsage.STORNIERT) &&
             effectivePrivatentnahmeDate &&
             effectivePrivatentnahmeDate.getFullYear().toString() === selectedYear) {
           einnahmenPrivatentnahme += wertTeilwertEntnahme;
