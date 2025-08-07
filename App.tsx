@@ -861,16 +861,19 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === TAB_OPTIONS.VERMOEGEN && (
-          <VermoegenPage 
-            products={products} 
+          <VermoegenPage
+            products={products}
             additionalExpenses={additionalExpenses}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
+            onUpdateProduct={handleSaveProductDetails}
+            euerSettings={euerSettings}
+            belegSettings={belegSettings}
           />
         )}
         {activeTab === TAB_OPTIONS.VERKAUFE && (
-          <SalesPage 
-            products={products} 
+          <SalesPage
+            products={products}
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}

@@ -1,17 +1,18 @@
 
 import React, { useMemo, useState } from 'react';
 import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '../../types';
-import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign } from 'react-icons/fa';
+import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
 import Button from '../Common/Button';
 import CreateShopModal from '../Shop/CreateShopModal';
 import PublishedUrlModal from '../Shop/PublishedUrlModal';
 import { generateShopHtml } from '../../utils/shopGenerator';
+import EditProductModal from '../Products/EditProductModal';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
 
-const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense }) => {
+const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings }) => {
   const [productSortKey, setProductSortKey] = useState<ProductSortKey>('date');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('desc');
   
@@ -23,6 +24,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [selectedAsins, setSelectedAsins] = useState<Set<string>>(new Set());
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0; // <--- MODIFIED HERE
 
@@ -210,6 +212,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                         {header.label} {renderProductSortIcon(header.key)}
                     </th>
                 ))}
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Aktion</th>
               </tr>
             </thead>
             <tbody className="bg-slate-800 divide-y divide-slate-700">
@@ -227,6 +230,11 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatDate(p.orderDateObj)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(p.etv)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(getCalculatedTeilwert(p))}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">
+                    <Button size="sm" variant="ghost" onClick={() => setEditingProduct(p)} title="Produkt bearbeiten">
+                      <FaEdit />
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -360,6 +368,19 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
       }}
     />
     <PublishedUrlModal url={publishedUrl || ''} isOpen={!!publishedUrl} onClose={() => setPublishedUrl(null)} />
+    {editingProduct && (
+      <EditProductModal
+        product={editingProduct}
+        isOpen={!!editingProduct}
+        onClose={() => setEditingProduct(null)}
+        onSave={async updated => {
+          await onUpdateProduct(updated);
+          setEditingProduct(null);
+        }}
+        euerSettings={euerSettings}
+        belegSettings={belegSettings}
+      />
+    )}
     </div>
   );
 };

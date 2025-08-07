@@ -81,6 +81,9 @@ export interface VermoegenPageProps {
   additionalExpenses: AdditionalExpense[];
   onAddExpense: (expense: Omit<AdditionalExpense, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
+  onUpdateProduct: (product: Product) => Promise<void>;
+  euerSettings: EuerSettings;
+  belegSettings: BelegSettings;
 }
 
 export interface EuerPageProps {
