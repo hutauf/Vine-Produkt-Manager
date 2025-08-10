@@ -113,7 +113,7 @@ const UsagePieCharts: React.FC<UsagePieChartsProps> = ({ products, selectedYear 
   return (
     <div className="p-4 bg-slate-750 rounded-md shadow-inner">
       <h4 className="text-md font-medium text-gray-200 mb-4 flex items-center">
-        <FaChartPie className="mr-2 text-sky-400" /> Bestandsverteilung ({selectedYear === 'all' ? 'Alle Jahre' : selectedYear})
+        <FaChartPie className="mr-2 text-sky-400" /> Bestandsverteilung (bestellt in {selectedYear === 'all' ? 'allen Jahren' : selectedYear})
       </h4>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {renderPie(pieData.etvData, 'ETV', formatCurrency)}

@@ -142,7 +142,7 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
 
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
         <h3 className="text-xl font-semibold text-gray-100 mb-4">
-          Verkaufte Produkte ({selectedPlotYear === 'all' ? 'Alle Jahre' : selectedPlotYear}): {filteredSoldProductsForTableAndPlots.length}
+          Verkaufte Produkte (verkauft in {selectedPlotYear === 'all' ? 'allen Jahren' : selectedPlotYear}): {filteredSoldProductsForTableAndPlots.length}
         </h3>
         {filteredSoldProductsForTableAndPlots.length === 0 ? (
           <div className="text-center py-10">
