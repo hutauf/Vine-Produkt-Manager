@@ -11,7 +11,7 @@ import SettingsPage from './components/Pages/SettingsPage';
 import BelegePage from './components/Pages/BelegePage';
 import { parseProductsFromFile } from './utils/fileParser';
 import { exportToJson, exportToXlsx } from './utils/dataExporter';
-import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData, apiGetTeilwertV2Data, TeilwertV2ApiValue } from './utils/apiService';
+import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData } from './utils/apiService';
 import { FaKey } from 'react-icons/fa';
 import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
@@ -205,57 +205,20 @@ const App: React.FC = () => {
     }
 
     // Apply Teilwert V2 data if setting is active
-    if (euerSettings.useTeilwertV2 && apiToken) {
-        console.log('Fetching Teilwert V2 data...');
-        const teilwertV2Response = await apiGetTeilwertV2Data(apiToken);
-        console.log('Teilwert V2 response', teilwertV2Response);
-        if (teilwertV2Response && teilwertV2Response.data) {
-            const teilwertV2Map = new Map<string, number>();
-            for (const asinKey in teilwertV2Response.data) {
-                try {
-                    const parsedValue = JSON.parse(teilwertV2Response.data[asinKey]) as Partial<TeilwertV2ApiValue>;
-                    if (parsedValue && typeof parsedValue.Teilwert === 'number') {
-                        teilwertV2Map.set(asinKey, parsedValue.Teilwert);
-                    }
-                } catch (e) {
-                    console.warn(`Fehler beim Parsen der Teilwert V2 Daten für ASIN ${asinKey}:`, e);
-                }
-            }
-            let appliedCount = 0;
-            processedProducts = processedProducts.map(p => {
-                const v2Teilwert = teilwertV2Map.get(p.ASIN);
-                if (v2Teilwert !== undefined) {
-                    appliedCount++;
-                    console.log(`ASIN ${p.ASIN} - using Teilwert V2:`, v2Teilwert);
-                    return {
-                        ...p,
-                        teilwert: v2Teilwert,
-                        pdf: `https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/XBhdyIB8tZZK2IOWzPl4GKJ5_AoHTeFHIHoTbAk8k6ypbRugFOzMxLeUeCSYz96-/n/frlwfg9yseap/b/bucket-20240714-1645/o/Teilwert_v2_${p.ASIN}.pdf`,
-                    };
-                } else {
-                    console.log(`ASIN ${p.ASIN} - no Teilwert V2 data, clearing`);
-                    return {
-                        ...p,
-                        teilwert: null,
-                        pdf: undefined,
-                    };
-                }
-            });
-            console.log(`Teilwert V2 applied for ${appliedCount} of ${processedProducts.length} products`);
-            setFeedbackMessage({ text: `Produktdaten synchronisiert. Teilwert V2 Daten angewendet.`, type: 'success' });
-        } else if (teilwertV2Response.status === 'error') {
-            setFeedbackMessage({ text: `Warnung: Konnte Teilwert V2 Daten nicht laden: ${teilwertV2Response.message}. Bestehende Teilwerte werden verwendet oder ggf. genullt.`, type: 'info' });
-             // If Teilwert V2 fetch fails but setting is on, nullify existing Teilwerts as per "forget" logic
-            console.warn('Teilwert V2 fetch failed', teilwertV2Response.message);
-            processedProducts = processedProducts.map(p => ({
-                ...p,
-                teilwert: null,
-                pdf: undefined,
-            }));
-        } else {
-            console.warn('Unexpected Teilwert V2 response structure', teilwertV2Response);
-        }
-    }
+    processedProducts = processedProducts.map(p => {
+      if (euerSettings.useTeilwertV2) {
+        return {
+          ...p,
+          teilwert: p.teilwert_v2,
+          pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${p.ASIN}.pdf`,
+        };
+      } else {
+        return {
+          ...p,
+          pdf: `https://hutauf.org/oracle2/files/PTWMETWS_${p.ASIN}.pdf`,
+        };
+      }
+    });
     
     // Apply ignoreETVZeroProducts filter
     if (euerSettings.ignoreETVZeroProducts) {

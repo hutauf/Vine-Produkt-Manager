@@ -169,12 +169,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                         onChange={(e) => handleEuerSettingChange('useTeilwertV2', e.target.checked)}
                         className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
                     />
-                    <span>Teilwert v2 (aus "v2processstatus" Datenbank) verwenden</span>
+                    <span>Teilwert v2 verwenden</span>
                 </label>
                 <p className="text-xs text-gray-500 mt-1 pl-6">
-                    Wenn aktiv, wird der Teilwert und der zugehörige PDF-Link aus der neueren v2 Datenbank geladen.
-                    Falls für ein Produkt keine v2 Daten gefunden werden, wird der Teilwert auf 'null' gesetzt.
-                    Sonst wird der ursprüngliche Teilwert aus der Haupt-Produktdatenbank verwendet.
+                    Wenn aktiv, wird der Teilwert aus dem "teilwert_v2" Feld des Produkts verwendet.
+                    Sonst wird der ursprüngliche Teilwert aus dem "teilwert" Feld verwendet.
                 </p>
             </div>
 
@@ -233,7 +232,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           <div className="pt-4 border-t border-slate-600">
               <h4 className="text-md font-medium text-red-300 mb-1">Backend API URL (Primäre Produktdatenbank)</h4>
               <p className="text-sm text-gray-400 mb-2">
-                  URL für die Haupt-Produktdatenbank (<code>data_operations</code>). Die URL für Teilwert v2 (<code>kv/get_all</code>) ist fest codiert.
+                  URL für die Haupt-Produktdatenbank (<code>data_operations</code>).
               </p>
               <input
                 type="text"

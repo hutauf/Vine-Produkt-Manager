@@ -17,6 +17,7 @@ export interface Product {
   etv: number;
   keepa?: number | null;
   teilwert: number | null; 
+  teilwert_v2: number | null; 
   pdf?: string;
   myTeilwert?: number | null;
   myTeilwertReason?: string;

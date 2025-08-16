@@ -128,6 +128,7 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       etv: typeof valueData.etv === 'number' ? valueData.etv : 0,
       keepa: typeof valueData.keepa === 'number' ? valueData.keepa : null,
       teilwert: typeof valueData.teilwert === 'number' ? valueData.teilwert : null, 
+      teilwert_v2: typeof valueData.teilwert_v2 === 'number' ? valueData.teilwert_v2 : null, 
       pdf: valueData.pdf || undefined,
       myTeilwert: typeof valueData.myTeilwert === 'number' ? valueData.myTeilwert : null,
       myTeilwertReason: valueData.myTeilwertReason || '',
@@ -221,20 +222,7 @@ export const apiDeleteAllData = async (baseUrl: string, token: string): Promise<
   return fetchApiPost<null>(baseUrl, body);
 };
 
-// New function to get Teilwert v2 data
-// The response structure is expected to be: { status: "success", data: { "ASIN1": "{\"Teilwert\": 12.34, ...}", "ASIN2": "{...}" } }
-export const apiGetTeilwertV2Data = async (token: string): Promise<ApiResponse<{[asin: string]: string}>> => {
-  if (!token) {
-    return { status: 'error', message: 'API token is not set for Teilwert V2.' };
-  }
-  const body = {
-    token: token,
-    database: "v2processstatus",
-    request: "get_all" // Assuming "get_all" is the correct request type
-  };
-  // Using TEILWERT_V2_API_URL directly as per specification
-  return fetchApiPost<{[asin: string]: string}>(TEILWERT_V2_API_URL, body);
-};
+
 
 export const apiGetImages = async (asins: string[]): Promise<{[asin: string]: string[]}> => {
   const resp = await fetch('/oracle2/api/get_images', {
