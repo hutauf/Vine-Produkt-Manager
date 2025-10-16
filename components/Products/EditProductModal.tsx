@@ -159,14 +159,20 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     }
     const updatedProduct = buildUpdatedProduct();
 
+    // Clone the product and remove fields that should not be sent to the backend
+    const productToSend = { ...updatedProduct };
+    delete (productToSend as any).teilwert;
+    delete (productToSend as any).teilwert_v2;
+
+
     if (actionType === 'save') {
       setIsSaving(true);
-      await onSave(updatedProduct);
+      await onSave(productToSend);
       setIsSaving(false);
       onClose(); // Close modal after successful save
     } else if (actionType === 'saveAndFinalize' && onSaveAndFinalize) {
       setIsSavingAndFinalizing(true);
-      const result = await onSaveAndFinalize(updatedProduct, true); // Default attachPdf to true from modal
+      const result = await onSaveAndFinalize(productToSend, true); // Default attachPdf to true from modal
       setIsSavingAndFinalizing(false);
       if (result.success) {
         onClose(); // Close modal after successful save & finalize
