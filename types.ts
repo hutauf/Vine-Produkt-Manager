@@ -93,3 +93,12 @@ export interface EuerPageProps {
   onSettingsChange: (settings: EuerSettings) => void;
   additionalExpenses: AdditionalExpense[]; // Added for EÜR calculation
 }
+
+export interface ProductHistoryEntry {
+  id: number;
+  ASIN: string;
+  change_timestamp: number;
+  changed_key: string;
+  new_value: string;
+  old_value: string | null;
+}

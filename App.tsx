@@ -811,7 +811,9 @@ const App: React.FC = () => {
                 onSaveAndFinalizeProduct={handleSaveAndFinalizeProduct} 
                 onFileUpload={handleFileUpload} 
                 euerSettings={euerSettings}
-                belegSettings={belegSettings} 
+                belegSettings={belegSettings}
+                apiToken={apiToken}
+                apiBaseUrl={apiBaseUrl}
             />
           </>
         )}

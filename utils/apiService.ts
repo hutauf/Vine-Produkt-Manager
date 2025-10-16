@@ -233,3 +233,9 @@ export const apiGetImages = async (asins: string[]): Promise<{[asin: string]: st
   if (!resp.ok) throw new Error('failed to fetch images');
   return resp.json();
 };
+
+export const apiGetAsinHistory = async (baseUrl: string, token: string, asin: string): Promise<ApiResponse<ProductHistoryEntry[]>> => {
+  const body = { token, request: "get_asin_history", payload: { ASIN: asin } };
+  const response = await fetchApiPost<ProductHistoryEntry[]>(baseUrl, body);
+  return response;
+};

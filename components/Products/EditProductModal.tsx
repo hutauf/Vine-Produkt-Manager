@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Product, ProductUsage, EuerSettings, BelegSettings } from '../../types';
+import { Product, ProductUsage, EuerSettings, BelegSettings, ProductHistoryEntry } from '../../types';
 import { PRODUCT_USAGE_OPTIONS } from '../../constants';
 import Modal from '../Common/Modal';
 import Button from '../Common/Button';
@@ -9,9 +9,11 @@ import {
     parseGermanDate,
     getTodayGermanFormat,
     convertGermanToISO,
-    convertISOToGerman
+    convertISOToGerman,
+    formatDateToGermanDDMMYYYY
 } from '../../utils/dateUtils';
 import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
+import { apiGetAsinHistory } from '../../utils/apiService';
 
 interface EditProductModalProps {
   product: Product;
@@ -21,6 +23,8 @@ interface EditProductModalProps {
   onSaveAndFinalize?: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New optional prop
   euerSettings: EuerSettings; // New prop
   belegSettings: BelegSettings; // New prop
+  apiToken: string | null;
+  apiBaseUrl: string;
   // context?: 'dashboard' | 'belege'; // Optional: to slightly alter behavior if needed
 }
 
@@ -36,7 +40,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     onSave, 
     onSaveAndFinalize,
     euerSettings,
-    belegSettings
+    belegSettings,
+    apiToken,
+    apiBaseUrl
 }) => {
   const [formData, setFormData] = useState({
     myTeilwert: product.myTeilwert?.toString() ?? '',
@@ -53,6 +59,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   const [goBDActionType, setGoBDActionType] = useState<'save' | 'saveAndFinalize' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingAndFinalizing, setIsSavingAndFinalizing] = useState(false);
+  const [history, setHistory] = useState<ProductHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -71,8 +80,27 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       setGoBDActionType(null);
       setIsSaving(false);
       setIsSavingAndFinalizing(false);
+
+      if (apiToken) {
+        setHistoryLoading(true);
+        setHistoryError(null);
+        apiGetAsinHistory(apiBaseUrl, apiToken, product.ASIN)
+          .then(response => {
+            if (response.status === 'success' && response.data) {
+              setHistory(response.data);
+            } else {
+              setHistoryError(response.message || 'Failed to fetch history.');
+            }
+          })
+          .catch(error => {
+            setHistoryError(error.message || 'An unknown error occurred.');
+          })
+          .finally(() => {
+            setHistoryLoading(false);
+          });
+      }
     }
-  }, [product, isOpen]);
+  }, [product, isOpen, apiToken, apiBaseUrl]);
 
   const handleChange = (field: keyof typeof formData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -303,6 +331,36 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
               <textarea id="buyerAddress" value={formData.buyerAddress} onChange={(e) => handleChange('buyerAddress', e.target.value)} rows={3} className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm" placeholder="Name&#10;Straße Hausnr.&#10;PLZ Ort"/>
             </div>
           </>
+        )}
+
+        <hr className="border-slate-600 my-4" />
+        <h4 className="text-md font-semibold text-gray-200 mb-2">Änderungshistorie</h4>
+        {historyLoading && <p>Lade Historie...</p>}
+        {historyError && <p className="text-red-400">Fehler beim Laden der Historie: {historyError}</p>}
+        {!historyLoading && !historyError && history.length === 0 && <p className="text-gray-400">Keine Historie für dieses Produkt gefunden.</p>}
+        {!historyLoading && !historyError && history.length > 0 && (
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-700">
+                    <thead className="bg-slate-750">
+                        <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Datum</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Feld</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Alter Wert</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Neuer Wert</th>
+                        </tr>
+                    </thead>
+                    <tbody className="bg-slate-800 divide-y divide-slate-700">
+                        {history.map(entry => (
+                            <tr key={entry.id}>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{formatDateToGermanDDMMYYYY(new Date(entry.change_timestamp * 1000))}</td>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.changed_key}</td>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.old_value}</td>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.new_value}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         )}
       </div>
       <div className="flex flex-wrap justify-end space-x-3 pt-4 border-t border-slate-700 mt-4">

@@ -12,6 +12,8 @@ interface ProductTableProps {
   onSaveAndFinalizeProduct: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New prop
   euerSettings: EuerSettings; // New prop
   belegSettings: BelegSettings; // New prop
+  apiToken: string | null;
+  apiBaseUrl: string;
 }
 
 type SortKey = keyof Product | 'calculatedTeilwert';
@@ -19,14 +21,15 @@ type SortOrder = 'asc' | 'desc';
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 
-const ProductTable: React.FC<ProductTableProps> = ({ 
-    products, 
-    onUpdateProduct, 
-    onSaveAndFinalizeProduct, 
+const ProductTable: React.FC<ProductTableProps> = ({
+    products,
+    onUpdateProduct,
+    onSaveAndFinalizeProduct,
     euerSettings,
-    belegSettings
-}) => {
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    belegSettings,
+    apiToken,
+    apiBaseUrl
+}) => {  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -268,6 +271,8 @@ const ProductTable: React.FC<ProductTableProps> = ({
           onSaveAndFinalize={onSaveAndFinalizeProduct} // Pass new handler
           euerSettings={euerSettings} // Pass EuerSettings
           belegSettings={belegSettings} // Pass BelegSettings
+          apiToken={apiToken}
+          apiBaseUrl={apiBaseUrl}
         />
       )}
     </>
