@@ -159,10 +159,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     }
     const updatedProduct = buildUpdatedProduct();
 
-    // Clone the product and remove fields that should not be sent to the backend
+    // Clone the product to avoid mutating original reference
     const productToSend = { ...updatedProduct };
-    delete (productToSend as any).teilwert;
-    delete (productToSend as any).teilwert_v2;
 
 
     if (actionType === 'save') {
@@ -192,10 +190,18 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       const isDefektNow = formData.usageStatus.includes(ProductUsage.DEFEKT);
       const defektChanged = wasDefekt !== isDefektNow;
 
-      if (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged) {
+      const wasLager = product.usageStatus.includes(ProductUsage.LAGER);
+      const wasVerkauft = product.usageStatus.includes(ProductUsage.VERKAUFT);
+      const isVerkauftNow = formData.usageStatus.includes(ProductUsage.VERKAUFT);
+      const isLagerToVerkaufTransition = wasLager && !wasVerkauft && isVerkauftNow;
+
+      const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
+        && !isLagerToVerkaufTransition;
+
+      if (shouldTriggerGoBDWarning) {
         setGoBDActionType(actionType);
         setShowGoBDConfirmModal(true);
-        return; 
+        return;
       }
     }
     proceedWithSaveAction(actionType);
