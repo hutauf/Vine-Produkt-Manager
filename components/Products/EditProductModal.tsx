@@ -14,6 +14,8 @@ import {
 } from '../../utils/dateUtils';
 import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
 import { apiGetAsinHistory } from '../../utils/apiService';
+import { isProductIgnoredByStreuartikel } from '../../utils/euerUtils';
+import { formatBookingDate, getProductBookingEntries } from '../../utils/bookingUtils';
 
 interface EditProductModalProps {
   product: Product;
@@ -23,8 +25,9 @@ interface EditProductModalProps {
   onSaveAndFinalize?: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New optional prop
   euerSettings: EuerSettings; // New prop
   belegSettings: BelegSettings; // New prop
-  apiToken: string | null;
-  apiBaseUrl: string;
+  apiToken?: string | null;
+  apiBaseUrl?: string;
+  onOpenBelegeTab?: (options: { invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string }) => void;
   // context?: 'dashboard' | 'belege'; // Optional: to slightly alter behavior if needed
 }
 
@@ -42,7 +45,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     euerSettings,
     belegSettings,
     apiToken,
-    apiBaseUrl
+    apiBaseUrl,
+    onOpenBelegeTab
 }) => {
   const [formData, setFormData] = useState({
     myTeilwert: product.myTeilwert?.toString() ?? '',
@@ -81,7 +85,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       setIsSaving(false);
       setIsSavingAndFinalizing(false);
 
-      if (apiToken) {
+      if (apiToken && apiBaseUrl) {
         setHistoryLoading(true);
         setHistoryError(null);
         apiGetAsinHistory(apiBaseUrl, apiToken, product.ASIN)
@@ -195,8 +199,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       const isVerkauftNow = formData.usageStatus.includes(ProductUsage.VERKAUFT);
       const isLagerToVerkaufTransition = wasLager && !wasVerkauft && isVerkauftNow;
 
-      const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
-        && !isLagerToVerkaufTransition;
+      const privatentnahmeDateChanged = (formData.privatentnahmeDate || '') !== (product.privatentnahmeDate || '');
+      const entnahmeHasBeleg = Boolean(product.entnahmeBelegNummer);
+
+      const shouldTriggerGoBDWarning = ((myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
+        && !isLagerToVerkaufTransition) || (entnahmeHasBeleg && privatentnahmeDateChanged);
 
       if (shouldTriggerGoBDWarning) {
         setGoBDActionType(actionType);
@@ -259,7 +266,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
   const canFinalize = onSaveAndFinalize &&
                       product.festgeschrieben !== 1 &&
-                      !(euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) &&
+                      !isProductIgnoredByStreuartikel(product, euerSettings) &&
                       belegSettings.userData.nameOrCompany.trim() !== '' &&
                       belegSettings.userData.addressLine1.trim() !== '' &&
                       belegSettings.userData.addressLine2.trim() !== '' &&
@@ -267,7 +274,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   
   let finalizeDisabledTooltip = "";
   if (product.festgeschrieben === 1) finalizeDisabledTooltip = "Produkt ist bereits festgeschrieben.";
-  else if (euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
+  else if (isProductIgnoredByStreuartikel(product, euerSettings)) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
   else if (!(belegSettings.userData.nameOrCompany.trim() && belegSettings.userData.addressLine1.trim() && belegSettings.userData.addressLine2.trim() && belegSettings.userData.vatId.trim())) {
     finalizeDisabledTooltip = "Absenderdaten (Name, Adresse, USt-IdNr.) in Beleg-Einstellungen fehlen.";
   }
@@ -344,6 +351,55 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </>
         )}
+
+        <hr className="border-slate-600 my-4" />
+        <h4 className="text-md font-semibold text-gray-200 mb-2">Belegzuordnung</h4>
+        <div className="text-sm text-gray-300 space-y-1 mb-4">
+          <div>
+            Einnahmebeleg:&nbsp;
+            {product.rechnungsNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={() => onOpenBelegeTab?.({ invoiceNumber: product.rechnungsNummer, asin: product.ASIN })}>
+                {product.rechnungsNummer}
+              </button>
+            ) : (
+              <span className="text-gray-500">nicht vorhanden</span>
+            )}
+          </div>
+          <div>
+            Entnahmebeleg:&nbsp;
+            {product.entnahmeBelegNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={() => onOpenBelegeTab?.({ entnahmeBelegNummer: product.entnahmeBelegNummer, asin: product.ASIN })}>
+                {product.entnahmeBelegNummer}
+              </button>
+            ) : (
+              <span className="text-gray-500">nicht vorhanden</span>
+            )}
+          </div>
+        </div>
+
+        <h4 className="text-md font-semibold text-gray-200 mb-2">Buchungs-Flow</h4>
+        <div className="overflow-x-auto mb-4">
+          <table className="min-w-full divide-y divide-slate-700">
+            <thead className="bg-slate-750">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Art</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Datum</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Betrag</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Basis</th>
+              </tr>
+            </thead>
+            <tbody className="bg-slate-800 divide-y divide-slate-700">
+              {getProductBookingEntries(buildUpdatedProduct(), euerSettings).map((entry, idx) => (
+                <tr key={`${entry.type}-${idx}`}>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-200">{entry.type}</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{formatBookingDate(entry.date)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.amount.toFixed(2)} €</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-400">{entry.label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <hr className="border-slate-600 my-4" />
         <h4 className="text-md font-semibold text-gray-200 mb-2">Änderungshistorie</h4>

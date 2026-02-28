@@ -16,6 +16,7 @@ import { FaKey } from 'react-icons/fa';
 import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
 import { generatePdfWithAppendedDocs } from './utils/pdfGenerator';
+import { isProductIgnoredByStreuartikel } from './utils/euerUtils';
 
 
 const API_TOKEN_STORAGE_KEY = 'vineApp_apiToken';
@@ -85,6 +86,7 @@ const App: React.FC = () => {
 
 
   const [activeTab, setActiveTab] = useState<string>(TAB_OPTIONS.DASHBOARD);
+  const [belegeFocus, setBelegeFocus] = useState<{ invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -303,6 +305,11 @@ const App: React.FC = () => {
     }
   }, [feedbackMessage]);
 
+  const handleOpenBelegeTab = (options: { invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string }) => {
+    setBelegeFocus(options);
+    setActiveTab(TAB_OPTIONS.BELEGE);
+  };
+
   const handleApiTokenChange = (newToken: string) => {
     const trimmedToken = newToken.trim();
     setApiToken(trimmedToken); 
@@ -476,7 +483,7 @@ const App: React.FC = () => {
       const sortedTodoInYear = yearProducts
         .filter(p => {
             if (p.festgeschrieben === 1 || p.usageStatus.includes(ProductUsage.STORNIERT)) return false;
-            if (euerSettings.streuArtikelLimitActive && p.etv < euerSettings.streuArtikelLimitValue) {
+            if (isProductIgnoredByStreuartikel(p, euerSettings)) {
                 return false; 
             }
             return true;
@@ -513,7 +520,7 @@ const App: React.FC = () => {
       return { success: false, message: "Fehler: Wichtige Absenderdaten (Name, Adresse, USt-IdNr.) fehlen in den Beleg-Einstellungen." };
     }
 
-    if (euerSettings.streuArtikelLimitActive && productToFinalize.etv < euerSettings.streuArtikelLimitValue) {
+    if (isProductIgnoredByStreuartikel(productToFinalize, euerSettings)) {
       return { success: false, message: "Fehler: Streuartikel können nicht festgeschrieben werden." };
     }
 
@@ -642,7 +649,7 @@ const App: React.FC = () => {
     products.forEach(p => {
       const orderDate = parseDMYtoDate(p.date);
       if (orderDate && orderDate < thresholdDate && p.festgeschrieben !== 1) {
-        if (euerSettings.streuArtikelLimitActive && p.etv < euerSettings.streuArtikelLimitValue) {
+        if (isProductIgnoredByStreuartikel(p, euerSettings)) {
             return; 
         }
         productsToUpdate.push({
@@ -834,6 +841,7 @@ const App: React.FC = () => {
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
+            onOpenBelegeTab={handleOpenBelegeTab}
           />
         )}
         {activeTab === TAB_OPTIONS.VERKAUFE && (
@@ -842,6 +850,7 @@ const App: React.FC = () => {
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
+            onOpenBelegeTab={handleOpenBelegeTab}
           />
         )}
         {activeTab === TAB_OPTIONS.BELEGE && (
@@ -856,6 +865,8 @@ const App: React.FC = () => {
             onSaveAndFinalizeProduct={handleSaveAndFinalizeProduct} 
             setAppFeedbackMessage={setFeedbackMessage}
             onExecuteBulkBelegFestschreiben={executeBulkBelegFestschreiben} 
+            focusOptions={belegeFocus}
+            onFocusConsumed={() => setBelegeFocus(null)}
           />
         )}
         {activeTab === TAB_OPTIONS.SETTINGS && (
