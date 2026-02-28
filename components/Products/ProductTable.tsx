@@ -14,6 +14,7 @@ interface ProductTableProps {
   belegSettings: BelegSettings; // New prop
   apiToken: string | null;
   apiBaseUrl: string;
+  onNavigateToBelege?: (asin: string) => void;
 }
 
 type SortKey = keyof Product | 'calculatedTeilwert';
@@ -28,7 +29,8 @@ const ProductTable: React.FC<ProductTableProps> = ({
     euerSettings,
     belegSettings,
     apiToken,
-    apiBaseUrl
+    apiBaseUrl,
+    onNavigateToBelege
 }) => {  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -273,6 +275,7 @@ const ProductTable: React.FC<ProductTableProps> = ({
           belegSettings={belegSettings} // Pass BelegSettings
           apiToken={apiToken}
           apiBaseUrl={apiBaseUrl}
+          onNavigateToBelege={onNavigateToBelege}
         />
       )}
     </>
