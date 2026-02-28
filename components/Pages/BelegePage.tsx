@@ -5,7 +5,8 @@ import Button from '../Common/Button';
 import { FaSave, FaUserEdit, FaBuilding, FaListAlt, FaArchive, FaPrint, FaCheckCircle, FaInfoCircle, FaFilePdf, FaSpinner, FaExternalLinkAlt, FaEdit, FaCalendarAlt, FaBoxes } from 'react-icons/fa';
 import { parseDMYtoDate, getEffectivePrivatentnahmeDate, convertGermanToISO, convertISOToGerman, getEndOfQuarter, getOldestUnfinalizedProductDate, parseGermanDate, formatDateToGermanDDMMYYYY } from '../../utils/dateUtils';
 import { generatePdfWithAppendedDocs } from '../../utils/pdfGenerator'; 
-import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from '../../utils/belegUtils'; 
+import { generateBelegTextForPdf, generateBulkBelegTextForPdf, generateAusgabenBelegText, generateEntnahmeBelegText } from '../../utils/belegUtils'; 
+import { getProductBaseValue, getProductBookingFlow, isProductIgnoredByStreuartikel, isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 import EditProductModal from '../Products/EditProductModal'; 
 
 interface BelegePageProps {
@@ -25,6 +26,8 @@ interface BelegePageProps {
     performanceEnd: string, 
     attachExtPdfs: boolean
   ) => Promise<{success: boolean; message: string;}>;
+  focusAsin?: string | null;
+  onFocusAsinHandled?: () => void;
 }
 
 const BelegePage: React.FC<BelegePageProps> = ({ 
@@ -37,7 +40,9 @@ const BelegePage: React.FC<BelegePageProps> = ({
     proposedInvoiceNumbers,
     onSaveAndFinalizeProduct,
     setAppFeedbackMessage,
-    onExecuteBulkBelegFestschreiben
+    onExecuteBulkBelegFestschreiben,
+    focusAsin,
+    onFocusAsinHandled
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'todo' | 'archiviert'>('todo');
   const [selectedProductForBeleg, setSelectedProductForBeleg] = useState<Product | null>(null);
@@ -51,9 +56,10 @@ const BelegePage: React.FC<BelegePageProps> = ({
   const [selectedBulkProductASINs, setSelectedBulkProductASINs] = useState<Set<string>>(new Set());
   const [bulkBelegPreviewText, setBulkBelegPreviewText] = useState<string>('');
   const [isBulkFestschreibenLoading, setIsBulkFestschreibenLoading] = useState<boolean>(false);
+  const [isGeneratingSecondaryBeleg, setIsGeneratingSecondaryBeleg] = useState<boolean>(false);
 
   const isStreuArtikel = useCallback((product: Product, settings: EuerSettings): boolean => {
-    return settings.streuArtikelLimitActive && product.etv < settings.streuArtikelLimitValue;
+    return isProductIgnoredForBelegAndEuer(product, settings);
   }, []);
 
   useEffect(() => {
@@ -167,6 +173,83 @@ const BelegePage: React.FC<BelegePageProps> = ({
     };
   }, [selectedProductForBeleg, activeSubTab, products, belegSettings, euerSettings, proposedInvoiceNumbers, isStreuArtikel]);
 
+  const getProductsForCurrentInvoice = useCallback((): Product[] => {
+    if (currentBelegDisplayInfo.type === 'none') return [];
+    return currentBelegDisplayInfo.productsInvolved.filter(p => !isProductIgnoredForBelegAndEuer(p, euerSettings));
+  }, [currentBelegDisplayInfo, euerSettings]);
+
+  const productsWithExpenseBooking = useMemo(() => {
+    return getProductsForCurrentInvoice().filter(p => getProductBookingFlow(p, euerSettings).some(e => e.type === 'Ausgabe'));
+  }, [getProductsForCurrentInvoice, euerSettings]);
+
+  const productsWithEntnahmeBooking = useMemo(() => {
+    return getProductsForCurrentInvoice().filter(p => getProductBookingFlow(p, euerSettings).some(e => e.type === 'Entnahme'));
+  }, [getProductsForCurrentInvoice, euerSettings]);
+
+  const handleGenerateAusgabenBeleg = async () => {
+    if (!currentBelegDisplayInfo.invoiceNumber || currentBelegDisplayInfo.type === 'none') return;
+    if (productsWithExpenseBooking.length === 0) return;
+
+    const text = generateAusgabenBelegText(productsWithExpenseBooking, belegSettings, euerSettings, currentBelegDisplayInfo.invoiceNumber);
+    if (text.startsWith('Fehler:')) {
+      setAppFeedbackMessage({ text, type: 'error' });
+      return;
+    }
+
+    setIsGeneratingSecondaryBeleg(true);
+    try {
+      await generatePdfWithAppendedDocs(text, `${currentBelegDisplayInfo.invoiceNumber}-Ausgabebeleg.pdf`, [], productsWithExpenseBooking.length > 1);
+      setAppFeedbackMessage({ text: 'Ausgabebeleg wurde erzeugt (nicht festgeschrieben).', type: 'success' });
+    } catch (e) {
+      setAppFeedbackMessage({ text: `Fehler beim Ausgabebeleg: ${e instanceof Error ? e.message : String(e)}`, type: 'error' });
+    } finally {
+      setIsGeneratingSecondaryBeleg(false);
+    }
+  };
+
+  const handleGenerateEntnahmeBeleg = async () => {
+    if (currentBelegDisplayInfo.type === 'none' || productsWithEntnahmeBooking.length === 0) return;
+
+    const years = Array.from(new Set(productsWithEntnahmeBooking.map(p => {
+      const flow = getProductBookingFlow(p, euerSettings).find(e => e.type === 'Entnahme');
+      return flow?.date.getFullYear();
+    }).filter((y): y is number => y != null)));
+
+    if (years.length !== 1) {
+      setAppFeedbackMessage({ text: 'Entnahmebeleg kann nur erzeugt werden, wenn alle Entnahmen im selben Jahr liegen.', type: 'error' });
+      return;
+    }
+
+    const year = years[0];
+    const prefix = `Entnahme-${year}-`;
+    const existingCounter = products
+      .map(p => p.entnahmeBelegNummer)
+      .filter((n): n is string => !!n && n.startsWith(prefix))
+      .map(n => parseInt(n.slice(prefix.length), 10))
+      .filter(n => !Number.isNaN(n));
+    const nextCounter = (existingCounter.length ? Math.max(...existingCounter) : 0) + 1;
+    const entnahmeBelegnummer = `${prefix}${String(nextCounter).padStart(4, '0')}`;
+
+    const text = generateEntnahmeBelegText(productsWithEntnahmeBooking, euerSettings, entnahmeBelegnummer);
+    if (text.startsWith('Fehler:')) {
+      setAppFeedbackMessage({ text, type: 'error' });
+      return;
+    }
+
+    setIsGeneratingSecondaryBeleg(true);
+    try {
+      await generatePdfWithAppendedDocs(text, `${entnahmeBelegnummer}.pdf`, [], productsWithEntnahmeBooking.length > 1);
+      for (const p of productsWithEntnahmeBooking) {
+        await onUpdateProduct({ ...p, entnahmeBelegNummer: entnahmeBelegnummer });
+      }
+      setAppFeedbackMessage({ text: `Entnahmebeleg ${entnahmeBelegnummer} erzeugt und bei Produkten gespeichert.`, type: 'success' });
+    } catch (e) {
+      setAppFeedbackMessage({ text: `Fehler beim Entnahmebeleg: ${e instanceof Error ? e.message : String(e)}`, type: 'error' });
+    } finally {
+      setIsGeneratingSecondaryBeleg(false);
+    }
+  };
+
 
   const handleSettingsChange = (
     section: 'userData' | 'recipientData',
@@ -188,6 +271,16 @@ const BelegePage: React.FC<BelegePageProps> = ({
     }
     setSelectedProductForBeleg(product);
   };
+
+  useEffect(() => {
+    if (!focusAsin) return;
+    const found = products.find(p => p.ASIN === focusAsin);
+    if (found) {
+      setActiveSubTab(found.festgeschrieben === 1 ? 'archiviert' : 'todo');
+      setSelectedProductForBeleg(found);
+    }
+    onFocusAsinHandled?.();
+  }, [focusAsin, products, onFocusAsinHandled]);
   
   const handleEditProductFromBelege = () => {
     if (selectedProductForBeleg) {
@@ -355,9 +448,7 @@ const BelegePage: React.FC<BelegePageProps> = ({
                   Bestellt: {p.date} 
                   {!forBulkSelection && <> | RN: <span className="font-semibold">{displayInvoiceNumber || (p.festgeschrieben === 1 ? 'N/A (Archiviert)' : 'Wird generiert...')}</span></>}
                   {forBulkSelection && (() => {
-                    const displayValue = euerSettings.useTeilwertForIncome
-                      ? p.myTeilwert ?? p.teilwert
-                      : p.etv;
+                    const displayValue = getProductBaseValue(p, euerSettings);
                     return (
                       <> | Wert: {displayValue != null ? `${displayValue.toFixed(2)}€` : 'Teilwert fehlt'}</>
                     );
@@ -496,6 +587,7 @@ const BelegePage: React.FC<BelegePageProps> = ({
                         </Button>
                     </>)}
                     {activeSubTab === 'archiviert' && (currentBelegDisplayInfo.type === 'single' || currentBelegDisplayInfo.type === 'bulk') && (
+                        <>
                         <Button variant="secondary" 
                             onClick={async () => { 
                                 const text = currentBelegDisplayInfo.generatedText;
@@ -530,6 +622,29 @@ const BelegePage: React.FC<BelegePageProps> = ({
                         >
                            {isFestschreibenLoading ? 'PDF generiert...' : 'PDF erneut herunterladen'}
                         </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={handleGenerateAusgabenBeleg}
+                          disabled={isGeneratingSecondaryBeleg || productsWithExpenseBooking.length === 0}
+                          leftIcon={isGeneratingSecondaryBeleg ? <FaSpinner className="animate-spin" /> : <FaFilePdf />}
+                        >
+                          Ausgabebeleg erzeugen
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={handleGenerateEntnahmeBeleg}
+                          disabled={isGeneratingSecondaryBeleg || productsWithEntnahmeBooking.length === 0}
+                          leftIcon={isGeneratingSecondaryBeleg ? <FaSpinner className="animate-spin" /> : <FaFilePdf />}
+                        >
+                          Entnahmebeleg erzeugen
+                        </Button>
+                        {productsWithExpenseBooking.length === 0 && (
+                          <p className="text-xs text-gray-500">Für diesen Einnahmebeleg gibt es gemäß aktueller Optionen keine Ausgabenbuchungen.</p>
+                        )}
+                        {productsWithEntnahmeBooking.length === 0 && (
+                          <p className="text-xs text-gray-500">Für diesen Einnahmebeleg gibt es gemäß aktueller Optionen keine Entnahmebuchungen.</p>
+                        )}
+                        </>
                     )}
                     <Button variant="ghost" onClick={() => navigator.clipboard.writeText(currentBelegDisplayInfo.generatedText).then(() => setAppFeedbackMessage({text: "Belegtext kopiert.", type: "info"}))} className="w-full" leftIcon={<FaPrint />} disabled={currentBelegDisplayInfo.generatedText.startsWith("Streuartikel:") || currentBelegDisplayInfo.generatedText.startsWith("Fehler:") || isFestschreibenLoading}>Belegtext kopieren</Button>
                 </div>
