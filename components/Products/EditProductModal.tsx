@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Product, ProductUsage, EuerSettings, BelegSettings, ProductHistoryEntry } from '../../types';
 import { PRODUCT_USAGE_OPTIONS } from '../../constants';
 import Modal from '../Common/Modal';
@@ -14,6 +14,7 @@ import {
 } from '../../utils/dateUtils';
 import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
 import { apiGetAsinHistory } from '../../utils/apiService';
+import { getBookingFlowForProduct, isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 
 interface EditProductModalProps {
   product: Product;
@@ -62,6 +63,18 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   const [history, setHistory] = useState<ProductHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const bookingFlowPreview = useMemo(() => {
+    const previewProduct: Product = {
+      ...product,
+      myTeilwert: formData.myTeilwert === '' ? null : parseFloat(formData.myTeilwert),
+      usageStatus: formData.usageStatus,
+      salePrice: formData.salePrice === '' ? null : parseFloat(formData.salePrice),
+      saleDate: formData.saleDate || undefined,
+      privatentnahmeDate: formData.privatentnahmeDate || undefined,
+    };
+    return getBookingFlowForProduct(previewProduct, euerSettings);
+  }, [product, formData, euerSettings]);
 
 
   useEffect(() => {
@@ -197,8 +210,10 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
       const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
         && !isLagerToVerkaufTransition;
+      const privatentnahmeDateChanged = (formData.privatentnahmeDate || '') !== (product.privatentnahmeDate || '');
+      const shouldWarnEntnahmeDateLock = !!product.entnahmeBelegNummer && privatentnahmeDateChanged;
 
-      if (shouldTriggerGoBDWarning) {
+      if (shouldTriggerGoBDWarning || shouldWarnEntnahmeDateLock) {
         setGoBDActionType(actionType);
         setShowGoBDConfirmModal(true);
         return;
@@ -259,7 +274,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
   const canFinalize = onSaveAndFinalize &&
                       product.festgeschrieben !== 1 &&
-                      !(euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) &&
+                      !isProductIgnoredForBelegAndEuer(product, euerSettings) &&
                       belegSettings.userData.nameOrCompany.trim() !== '' &&
                       belegSettings.userData.addressLine1.trim() !== '' &&
                       belegSettings.userData.addressLine2.trim() !== '' &&
@@ -267,7 +282,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   
   let finalizeDisabledTooltip = "";
   if (product.festgeschrieben === 1) finalizeDisabledTooltip = "Produkt ist bereits festgeschrieben.";
-  else if (euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
+  else if (isProductIgnoredForBelegAndEuer(product, euerSettings)) finalizeDisabledTooltip = "Ignorierte Produkte können nicht festgeschrieben werden.";
   else if (!(belegSettings.userData.nameOrCompany.trim() && belegSettings.userData.addressLine1.trim() && belegSettings.userData.addressLine2.trim() && belegSettings.userData.vatId.trim())) {
     finalizeDisabledTooltip = "Absenderdaten (Name, Adresse, USt-IdNr.) in Beleg-Einstellungen fehlen.";
   }
@@ -288,6 +303,59 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         )}
 
         {/* Form fields ... */}
+        <div className="p-3 bg-slate-750 border border-slate-700 rounded-md text-xs text-gray-300 space-y-2">
+          {product.rechnungsNummer && (
+            <p>
+              Einnahme-Belegnummer:{' '}
+              <button
+                type="button"
+                className="text-sky-400 underline"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-beleg-tab', { detail: { invoiceNumber: product.rechnungsNummer } }))}
+              >
+                {product.rechnungsNummer}
+              </button>
+            </p>
+          )}
+          {product.entnahmeBelegNummer && (
+            <p>
+              Entnahme-Belegnummer:{' '}
+              <button
+                type="button"
+                className="text-sky-400 underline"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-beleg-tab', { detail: { entnahmeBelegNummer: product.entnahmeBelegNummer } }))}
+              >
+                {product.entnahmeBelegNummer}
+              </button>
+            </p>
+          )}
+        </div>
+
+        <div>
+          <h4 className="text-md font-semibold text-gray-200 mb-2">Buchungs-Flow (Vorschau)</h4>
+          {bookingFlowPreview.length === 0 ? (
+            <p className="text-xs text-gray-400">Keine Buchungszeilen verfügbar (z.B. storniert oder ignoriert).</p>
+          ) : (
+            <table className="w-full text-xs border border-slate-700 rounded-md overflow-hidden">
+              <thead className="bg-slate-750">
+                <tr>
+                  <th className="text-left px-2 py-1">Typ</th>
+                  <th className="text-left px-2 py-1">Datum</th>
+                  <th className="text-right px-2 py-1">Betrag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bookingFlowPreview.map((entry, idx) => (
+                  <tr key={`${entry.type}-${idx}`} className="border-t border-slate-700">
+                    <td className="px-2 py-1">{entry.label}</td>
+                    <td className="px-2 py-1">{entry.date.toLocaleDateString('de-DE')}</td>
+                    <td className="px-2 py-1 text-right">{entry.amount.toFixed(2)} €</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
         <div>
           <label htmlFor="myTeilwert" className="block text-sm font-medium text-gray-300">Eigener Teilwert (optional)</label>
           <input 
