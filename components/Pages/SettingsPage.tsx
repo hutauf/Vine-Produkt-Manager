@@ -201,7 +201,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                             onChange={(e) => handleEuerSettingChange('streuArtikelLimitValue', parseFloat(e.target.value) || 0)}
                             className="mt-1 block w-full max-w-xs px-3 py-1.5 bg-slate-600 border-slate-500 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-xs"
                         />
-                         <p className="text-xs text-gray-500 mt-1">Produkte mit ETV unter diesem Wert werden in EÜR und Beleg-Erstellung ignoriert.</p>
+                         <p className="text-xs text-gray-500 mt-1">Produkte mit ETV unter diesem Wert (inkl. ETV=0) werden in EÜR und Beleg-Erstellung ignoriert.</p>
                     </div>
                 )}
             </div>
@@ -214,10 +214,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                         onChange={(e) => handleEuerSettingChange('ignoreETVZeroProducts', e.target.checked)}
                         className="form-checkbox h-4 w-4 text-sky-600 bg-slate-600 border-slate-500 rounded focus:ring-sky-500"
                     />
-                    <span>Produkte mit ETV=0 global ignorieren/ausblenden</span>
+                    <span>Produkt mit ETV=0 ignorieren</span>
                 </label>
                 <p className="text-xs text-gray-500 mt-1 pl-6">
-                    Wenn aktiv, werden Produkte mit ETV=0 lokal ausgeblendet. Deaktivieren lädt ggf. vom Server nach (API Token benötigt).
+                    Wenn aktiv und die Streuartikelregelung nicht aktiv ist, werden nur Produkte mit ETV=0 ignoriert.
                 </p>
             </div>
         </div>

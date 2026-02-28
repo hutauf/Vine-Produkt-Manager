@@ -14,6 +14,7 @@ import {
 } from '../../utils/dateUtils';
 import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
 import { apiGetAsinHistory } from '../../utils/apiService';
+import { getProductBookingFlow, isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 
 interface EditProductModalProps {
   product: Product;
@@ -195,8 +196,10 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       const isVerkauftNow = formData.usageStatus.includes(ProductUsage.VERKAUFT);
       const isLagerToVerkaufTransition = wasLager && !wasVerkauft && isVerkauftNow;
 
-      const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
-        && !isLagerToVerkaufTransition;
+      const privatentnahmeDateChangedAfterEntnahmeBeleg = !!product.entnahmeBelegNummer && (formData.privatentnahmeDate || '') !== (product.privatentnahmeDate || '');
+
+      const shouldTriggerGoBDWarning = ((myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
+        && !isLagerToVerkaufTransition) || privatentnahmeDateChangedAfterEntnahmeBeleg;
 
       if (shouldTriggerGoBDWarning) {
         setGoBDActionType(actionType);
@@ -252,6 +255,20 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   };
   const setPrivatentnahmeDateToToday = () => handleChange('privatentnahmeDate', getTodayGermanFormat());
 
+  const previewProductForFlow: Product = {
+    ...product,
+    myTeilwert: formData.myTeilwert === '' ? null : parseFloat(formData.myTeilwert),
+    usageStatus: formData.usageStatus,
+    salePrice: formData.salePrice.trim() === '' ? null : parseFloat(formData.salePrice),
+    saleDate: formData.saleDate || undefined,
+    privatentnahmeDate: formData.privatentnahmeDate || undefined,
+  };
+  const bookingFlow = getProductBookingFlow(previewProductForFlow, euerSettings);
+
+  const openBelegTabForProduct = () => {
+    window.dispatchEvent(new CustomEvent('openBelegForProduct', { detail: { asin: product.ASIN } }));
+  };
+
   const isSold = formData.usageStatus.includes(ProductUsage.VERKAUFT);
   const isSalePriceInvalid = isSold && (formData.salePrice.trim() === '' || isNaN(parseFloat(formData.salePrice.trim())));
   const isSaleDateVisuallyInvalid = formData.saleDate.trim() !== '' && !isValidGermanDate(formData.saleDate);
@@ -259,7 +276,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
   const canFinalize = onSaveAndFinalize &&
                       product.festgeschrieben !== 1 &&
-                      !(euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) &&
+                      !isProductIgnoredForBelegAndEuer(product, euerSettings) &&
                       belegSettings.userData.nameOrCompany.trim() !== '' &&
                       belegSettings.userData.addressLine1.trim() !== '' &&
                       belegSettings.userData.addressLine2.trim() !== '' &&
@@ -267,7 +284,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   
   let finalizeDisabledTooltip = "";
   if (product.festgeschrieben === 1) finalizeDisabledTooltip = "Produkt ist bereits festgeschrieben.";
-  else if (euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
+  else if (isProductIgnoredForBelegAndEuer(product, euerSettings)) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
   else if (!(belegSettings.userData.nameOrCompany.trim() && belegSettings.userData.addressLine1.trim() && belegSettings.userData.addressLine2.trim() && belegSettings.userData.vatId.trim())) {
     finalizeDisabledTooltip = "Absenderdaten (Name, Adresse, USt-IdNr.) in Beleg-Einstellungen fehlen.";
   }
@@ -286,6 +303,36 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             Produkt ist festgeschrieben. Änderungen können GoBD verletzen.
           </div>
         )}
+
+        <div className="p-3 bg-slate-800 border border-slate-600 rounded-md text-sm">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-gray-300">Einnahme-Beleg:</span>
+            {product.rechnungsNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={openBelegTabForProduct}>{product.rechnungsNummer}</button>
+            ) : <span className="text-gray-500">nicht festgeschrieben</span>}
+            <span className="text-gray-300 ml-3">Entnahme-Beleg:</span>
+            {product.entnahmeBelegNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={openBelegTabForProduct}>{product.entnahmeBelegNummer}</button>
+            ) : <span className="text-gray-500">nicht vorhanden</span>}
+          </div>
+        </div>
+
+        <div className="p-3 bg-slate-800 border border-slate-600 rounded-md">
+          <p className="text-sm text-gray-300 mb-2">Buchungs-Flow (gemäß aktueller Einstellungen)</p>
+          <table className="w-full text-xs">
+            <thead><tr className="text-gray-400"><th className="text-left pb-1">Art</th><th className="text-left pb-1">Datum</th><th className="text-right pb-1">Betrag</th></tr></thead>
+            <tbody>
+              {bookingFlow.map((entry, idx) => (
+                <tr key={`${entry.type}-${idx}`} className="border-t border-slate-700 text-gray-200">
+                  <td className="py-1">{entry.type}</td>
+                  <td className="py-1">{entry.date.toLocaleDateString('de-DE')}</td>
+                  <td className="py-1 text-right">{entry.amount.toFixed(2)}€ ({entry.source})</td>
+                </tr>
+              ))}
+              {bookingFlow.length === 0 && <tr><td colSpan={3} className="text-gray-500 py-1">Keine Buchungen (evtl. ignoriertes Produkt/Streuartikel).</td></tr>}
+            </tbody>
+          </table>
+        </div>
 
         {/* Form fields ... */}
         <div>
