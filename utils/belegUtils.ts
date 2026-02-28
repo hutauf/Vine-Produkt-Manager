@@ -157,8 +157,8 @@ const buildSideReceipt = (
 
   products.forEach(product => {
     const relevant = getProductBookingEntries(product, euerSettings)
-      .filter(entry => entry.type === type && entry.receiptRelevant);
-    relevant.forEach(entry => rows.push({ product, amount: entry.amount, date: entry.date }));
+      .filter(entry => entry.type === type && entry.receiptRelevant && entry.amount != null);
+    relevant.forEach(entry => rows.push({ product, amount: entry.amount as number, date: entry.date }));
   });
 
   if (!rows.length) {

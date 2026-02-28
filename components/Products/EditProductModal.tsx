@@ -385,7 +385,6 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Art</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Datum</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Betrag</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Basis</th>
               </tr>
             </thead>
             <tbody className="bg-slate-800 divide-y divide-slate-700">
@@ -393,8 +392,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                 <tr key={`${entry.type}-${idx}`}>
                   <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-200">{entry.type}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{formatBookingDate(entry.date)}</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.amount.toFixed(2)} €</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-400">{entry.label}</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-300">{entry.amount == null ? 'N/A' : `${entry.amount.toFixed(2)} €`}</td>
                 </tr>
               ))}
             </tbody>

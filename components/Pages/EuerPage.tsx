@@ -51,14 +51,21 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       entries.forEach(entry => {
         const entryYear = entry.date.getUTCFullYear().toString();
         if (entryYear !== selectedYear) return;
+        if (entry.amount == null) return;
 
         if (entry.type === 'Einnahme') {
           einnahmenProduktzugang += entry.amount;
         } else if (entry.type === 'Ausgabe') {
-          if (p.usageStatus.includes(ProductUsage.BETRIEBLICHE_NUTZUNG) || settings.euerMethodETVInOutTeilwertEntnahme) {
+          if (p.usageStatus.includes(ProductUsage.BETRIEBLICHE_NUTZUNG)) {
             ausgabenAnlagevermoegen += entry.amount;
-          } else {
+          } else if (
+            p.usageStatus.includes(ProductUsage.LAGER) ||
+            p.usageStatus.includes(ProductUsage.VERKAUFT) ||
+            p.usageStatus.includes(ProductUsage.ENTSORGT)
+          ) {
             ausgabenUmlaufvermoegen += entry.amount;
+          } else {
+            ausgabenAnlagevermoegen += entry.amount;
           }
         } else if (entry.type === 'Entnahme') {
           einnahmenPrivatentnahme += entry.amount;
@@ -264,7 +271,6 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
           <p className="text-xs text-gray-400 mt-4 px-1">
             <FaInfoCircle className="inline mr-1 mb-0.5" />
             Methode aktiv: Einnahme und Ausgabe werden im Bestelljahr mit dem gewählten Basiswert (ETV/Teilwert) gebucht.
-            Bei späterer Privatentnahme wird der Teilwert im Entnahmejahr als Einnahme gebucht (außer bei Lager / betr. Nutzung).
           </p>
         ) : (
           <p className="text-xs text-gray-400 mt-4 px-1">

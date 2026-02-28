@@ -196,8 +196,8 @@ const BelegePage: React.FC<BelegePageProps> = ({
 
 
   const involvedProducts = currentBelegDisplayInfo.productsInvolved;
-  const expenseReceiptProducts = involvedProducts.filter(p => getProductBookingEntries(p, euerSettings).some(e => e.type === 'Ausgabe' && e.receiptRelevant));
-  const entnahmeReceiptProducts = involvedProducts.filter(p => getProductBookingEntries(p, euerSettings).some(e => e.type === 'Entnahme' && e.receiptRelevant));
+  const expenseReceiptProducts = involvedProducts.filter(p => getProductBookingEntries(p, euerSettings).some(e => e.type === 'Ausgabe' && e.receiptRelevant && e.amount != null));
+  const entnahmeReceiptProducts = involvedProducts.filter(p => getProductBookingEntries(p, euerSettings).some(e => e.type === 'Entnahme' && e.receiptRelevant && e.amount != null));
   const canGenerateAusgabeBeleg = expenseReceiptProducts.length > 0;
 
   const getNextEntnahmeNumber = (year: string): string => {
@@ -238,7 +238,7 @@ const BelegePage: React.FC<BelegePageProps> = ({
 
     const byYear = new Map<string, Product[]>();
     productsToProcess.forEach(product => {
-      const entnahmeEntry = getProductBookingEntries(product, euerSettings).find(e => e.type === 'Entnahme' && e.receiptRelevant);
+      const entnahmeEntry = getProductBookingEntries(product, euerSettings).find(e => e.type === 'Entnahme' && e.receiptRelevant && e.amount != null);
       if (!entnahmeEntry) return;
       const year = entnahmeEntry.date.getUTCFullYear().toString();
       byYear.set(year, [...(byYear.get(year) || []), product]);

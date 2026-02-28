@@ -7,7 +7,7 @@ export type BookingType = 'Einnahme' | 'Ausgabe' | 'Entnahme' | 'Verkauf';
 export interface ProductBookingEntry {
   type: BookingType;
   date: Date;
-  amount: number;
+  amount: number | null;
   label: string;
   receiptRelevant: boolean;
 }
@@ -18,7 +18,6 @@ export const getProductBookingEntries = (product: Product, settings: EuerSetting
   if (product.usageStatus.includes(ProductUsage.STORNIERT)) return [];
 
   const baseValue = getProductBaseValue(product, settings);
-  if (baseValue == null) return [];
 
   const entries: ProductBookingEntry[] = [];
   const effectivePrivatentnahmeDate = getEffectivePrivatentnahmeDate(product, settings);
@@ -39,7 +38,7 @@ export const getProductBookingEntries = (product: Product, settings: EuerSetting
     entries.push({ type: 'Ausgabe', date: orderDate, amount: baseValue, label: 'Basiswert', receiptRelevant: true });
 
     if (isPrivatentnahmeOrDefault && !isLagerOrBusiness && effectivePrivatentnahmeDate) {
-      entries.push({ type: 'Entnahme', date: effectivePrivatentnahmeDate, amount: entnahmeValue, label: 'Teilwert', receiptRelevant: true });
+      entries.push({ type: 'Entnahme', date: effectivePrivatentnahmeDate, amount: entnahmeValue ?? null, label: 'Teilwert', receiptRelevant: true });
     }
   } else {
     const isOrderIncomeStatus = product.usageStatus.includes(ProductUsage.LAGER) ||
