@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ProductUsage, EuerPageProps, EuerSettings } from '../../types';
 import { FaCalculator, FaCog, FaInfoCircle } from 'react-icons/fa';
-import { parseDMYtoDate, getEffectivePrivatentnahmeDate, parseGermanDate } from '../../utils/dateUtils';
+import { parseGermanDate } from '../../utils/dateUtils';
 import { DEFAULT_PRIVATENTNAHME_DELAY_OPTIONS } from '../../constants';
 import { isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 import { getProductBookingEntries } from '../../utils/bookingUtils';
@@ -11,6 +11,39 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
 
   const availableYears = useMemo(() => {
     const years = new Set<string>();
+
+    products.forEach(p => {
+      if (isProductIgnoredForBelegAndEuer(p, settings)) return;
+
+      const entries = getProductBookingEntries(p, settings);
+      entries.forEach(entry => years.add(entry.date.getUTCFullYear().toString()));
+
+      if (p.saleDate) {
+        const saleDateObj = parseGermanDate(p.saleDate);
+        if (saleDateObj) years.add(saleDateObj.getFullYear().toString());
+      }
+    });
+
+    additionalExpenses.forEach(exp => {
+      const expenseDate = parseGermanDate(exp.date);
+      if (expenseDate) years.add(expenseDate.getFullYear().toString());
+    });
+
+    const currentYear = new Date().getFullYear().toString();
+    if (!years.has(currentYear)) years.add(currentYear);
+
+    return Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
+  }, [products, settings, additionalExpenses]);
+
+  const euerData = useMemo(() => {
+    let einnahmenAusVerkauf = 0;
+    let einnahmenProduktzugang = 0;
+    let einnahmenPrivatentnahme = 0;
+
+    let ausgabenAnlagevermoegen = 0;
+    let ausgabenUmlaufvermoegen = 0;
+    const ausgabenHomeOffice = settings.homeOfficePauschale;
+
     products.forEach(p => {
       if (isProductIgnoredForBelegAndEuer(p, settings)) return;
 
