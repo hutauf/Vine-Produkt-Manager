@@ -12,7 +12,7 @@ import EditProductModal from '../Products/EditProductModal';
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
 
-const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings }) => {
+const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings, onNavigateToBelege }) => {
   const [productSortKey, setProductSortKey] = useState<ProductSortKey>('date');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('desc');
   
@@ -379,6 +379,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
         }}
         euerSettings={euerSettings}
         belegSettings={belegSettings}
+        onNavigateToBelege={onNavigateToBelege}
       />
     )}
     </div>

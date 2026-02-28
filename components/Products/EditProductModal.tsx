@@ -14,6 +14,8 @@ import {
 } from '../../utils/dateUtils';
 import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
 import { apiGetAsinHistory } from '../../utils/apiService';
+import { isProductIgnoredByStreuartikel } from '../../utils/euerUtils';
+import { getBookingFlowEntries } from '../../utils/euerUtils';
 
 interface EditProductModalProps {
   product: Product;
@@ -23,8 +25,9 @@ interface EditProductModalProps {
   onSaveAndFinalize?: (product: Product, attachPdf: boolean) => Promise<{success: boolean; message: string}>; // New optional prop
   euerSettings: EuerSettings; // New prop
   belegSettings: BelegSettings; // New prop
-  apiToken: string | null;
-  apiBaseUrl: string;
+  apiToken?: string | null;
+  apiBaseUrl?: string;
+  onNavigateToBelege?: (asin: string) => void;
   // context?: 'dashboard' | 'belege'; // Optional: to slightly alter behavior if needed
 }
 
@@ -41,8 +44,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     onSaveAndFinalize,
     euerSettings,
     belegSettings,
-    apiToken,
-    apiBaseUrl
+    apiToken = null,
+    apiBaseUrl = "",
+    onNavigateToBelege
 }) => {
   const [formData, setFormData] = useState({
     myTeilwert: product.myTeilwert?.toString() ?? '',
@@ -180,7 +184,9 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   };
 
   const handleAttempt = (actionType: 'save' | 'saveAndFinalize') => {
-    if (product.festgeschrieben === 1) {
+    const privatentnahmeDateChanged = (formData.privatentnahmeDate || '') !== (product.privatentnahmeDate || '');
+
+    if (product.festgeschrieben === 1 || (product.entnahmeBelegNummer && privatentnahmeDateChanged)) {
       const myTeilwertChanged = (formData.myTeilwert === '' ? null : parseFloat(formData.myTeilwert)) !== (product.myTeilwert ?? null);
       const myTeilwertReasonChanged = formData.myTeilwertReason !== (product.myTeilwertReason ?? '');
       const wasStorniert = product.usageStatus.includes(ProductUsage.STORNIERT);
@@ -195,7 +201,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       const isVerkauftNow = formData.usageStatus.includes(ProductUsage.VERKAUFT);
       const isLagerToVerkaufTransition = wasLager && !wasVerkauft && isVerkauftNow;
 
-      const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged)
+      const shouldTriggerGoBDWarning = (myTeilwertChanged || myTeilwertReasonChanged || storniertChanged || defektChanged || (product.entnahmeBelegNummer && privatentnahmeDateChanged))
         && !isLagerToVerkaufTransition;
 
       if (shouldTriggerGoBDWarning) {
@@ -259,7 +265,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
   const canFinalize = onSaveAndFinalize &&
                       product.festgeschrieben !== 1 &&
-                      !(euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) &&
+                      !isProductIgnoredByStreuartikel(product, euerSettings) &&
                       belegSettings.userData.nameOrCompany.trim() !== '' &&
                       belegSettings.userData.addressLine1.trim() !== '' &&
                       belegSettings.userData.addressLine2.trim() !== '' &&
@@ -267,10 +273,12 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   
   let finalizeDisabledTooltip = "";
   if (product.festgeschrieben === 1) finalizeDisabledTooltip = "Produkt ist bereits festgeschrieben.";
-  else if (euerSettings.streuArtikelLimitActive && product.etv < euerSettings.streuArtikelLimitValue) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
+  else if (isProductIgnoredByStreuartikel(product, euerSettings)) finalizeDisabledTooltip = "Streuartikel können nicht festgeschrieben werden.";
   else if (!(belegSettings.userData.nameOrCompany.trim() && belegSettings.userData.addressLine1.trim() && belegSettings.userData.addressLine2.trim() && belegSettings.userData.vatId.trim())) {
     finalizeDisabledTooltip = "Absenderdaten (Name, Adresse, USt-IdNr.) in Beleg-Einstellungen fehlen.";
   }
+
+  const bookingFlowRows = getBookingFlowEntries(buildUpdatedProduct(), euerSettings);
 
 
   return (
@@ -344,6 +352,60 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </>
         )}
+
+        <hr className="border-slate-600 my-4" />
+        <h4 className="text-md font-semibold text-gray-200 mb-2">Belegnummern & Buchungs-Flow</h4>
+        <div className="space-y-2 text-sm text-gray-300">
+          <p>
+            Einnahmebeleg:&nbsp;
+            {product.rechnungsNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={() => onNavigateToBelege?.(product.ASIN)}>
+                {product.rechnungsNummer}
+              </button>
+            ) : 'noch nicht festgeschrieben'}
+          </p>
+          <p>
+            Entnahmebeleg:&nbsp;
+            {product.entnahmeBelegNummer ? (
+              <button type="button" className="text-sky-400 hover:underline" onClick={() => onNavigateToBelege?.(product.ASIN)}>
+                {product.entnahmeBelegNummer}
+              </button>
+            ) : 'nicht vorhanden'}
+          </p>
+        </div>
+
+        <div className="overflow-x-auto mt-2">
+          <table className="min-w-full divide-y divide-slate-700 text-sm">
+            <thead className="bg-slate-750">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs text-gray-300 uppercase">Buchung</th>
+                <th className="px-3 py-2 text-left text-xs text-gray-300 uppercase">Datum</th>
+                <th className="px-3 py-2 text-left text-xs text-gray-300 uppercase">Betrag</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700 bg-slate-800">
+              {bookingFlowRows.map((row, idx) => (
+                <tr key={`${row.type}-${idx}`}>
+                  <td className="px-3 py-2">{row.type}</td>
+                  <td className="px-3 py-2">{row.date.toLocaleDateString('de-DE')}</td>
+                  <td className="px-3 py-2">{row.amount.toFixed(2)}€ ({row.note})</td>
+                </tr>
+              ))}
+              {isSold && formData.saleDate && formData.salePrice && !isNaN(parseFloat(formData.salePrice)) && (
+                <tr>
+                  <td className="px-3 py-2">Verkauf</td>
+                  <td className="px-3 py-2">{formData.saleDate}</td>
+                  <td className="px-3 py-2">{parseFloat(formData.salePrice).toFixed(2)}€</td>
+                </tr>
+              )}
+              {bookingFlowRows.length === 0 && (
+                <tr>
+                  <td className="px-3 py-2 text-gray-400" colSpan={3}>Keine Buchungszeilen für aktuelle Einstellungen (z.B. Storno/ignoriert).</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         <hr className="border-slate-600 my-4" />
         <h4 className="text-md font-semibold text-gray-200 mb-2">Änderungshistorie</h4>

@@ -29,6 +29,7 @@ export interface Product {
   last_update_time?: number; // Unix timestamp (integer seconds) from server
   festgeschrieben?: 1;
   rechnungsNummer?: string;
+  entnahmeBelegNummer?: string;
 }
 
 export interface EuerSettings {
@@ -40,6 +41,7 @@ export interface EuerSettings {
   defaultPrivatentnahmeDelay: string; // e.g., "0d", "7d", "14d", "28d", "90d", "180d"
   ignoreETVZeroProducts: boolean; // New setting
   useTeilwertV2: boolean; // New setting for Teilwert v2 source
+  privatentnahmeSameYearAsOnlyIncome: boolean;
 }
 
 export interface UserAddressData {
@@ -68,6 +70,7 @@ export interface SalesPageProps {
   onUpdateProduct: (product: Product) => Promise<void>;
   euerSettings: EuerSettings;
   belegSettings: BelegSettings;
+  onNavigateToBelege?: (asin: string) => void;
 }
 
 export interface AdditionalExpense {
@@ -85,6 +88,7 @@ export interface VermoegenPageProps {
   onUpdateProduct: (product: Product) => Promise<void>;
   euerSettings: EuerSettings;
   belegSettings: BelegSettings;
+  onNavigateToBelege?: (asin: string) => void;
 }
 
 export interface EuerPageProps {

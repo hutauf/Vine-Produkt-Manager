@@ -16,6 +16,7 @@ interface DashboardPageProps {
   belegSettings: BelegSettings;
   apiToken: string | null;
   apiBaseUrl: string;
+  onNavigateToBelege?: (asin: string) => void;
 }
 
 const DASHBOARD_YEAR_FILTER_KEY = 'vineApp_dashboard_yearFilter';
@@ -30,7 +31,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     euerSettings,
     belegSettings,
     apiToken,
-    apiBaseUrl
+    apiBaseUrl,
+    onNavigateToBelege
 }) => {
   const [yearFilter, setYearFilter] = useState<string>(() => {
     return localStorage.getItem(DASHBOARD_YEAR_FILTER_KEY) || 'all';
@@ -219,6 +221,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 belegSettings={belegSettings}
                 apiToken={apiToken}
                 apiBaseUrl={apiBaseUrl}
+                onNavigateToBelege={onNavigateToBelege}
             />
         ): (
             <div className="text-center py-10 bg-slate-800 rounded-lg shadow-md border border-slate-700">
