@@ -16,6 +16,7 @@ import { FaKey } from 'react-icons/fa';
 import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
 import { generatePdfWithAppendedDocs } from './utils/pdfGenerator';
+import { isProductIgnoredForBelegAndEuer } from './utils/euerUtils';
 
 
 const API_TOKEN_STORAGE_KEY = 'vineApp_apiToken';
@@ -87,6 +88,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>(TAB_OPTIONS.DASHBOARD);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [preselectedInvoiceNumberForBelege, setPreselectedInvoiceNumberForBelege] = useState<string | null>(null);
+  const [preselectedEntnahmeBelegForBelege, setPreselectedEntnahmeBelegForBelege] = useState<string | null>(null);
 
   useEffect(() => {
     if (apiToken) {
@@ -303,6 +306,18 @@ const App: React.FC = () => {
     }
   }, [feedbackMessage]);
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{ invoiceNumber?: string; entnahmeBelegNummer?: string }>;
+      setActiveTab(TAB_OPTIONS.BELEGE);
+      setPreselectedInvoiceNumberForBelege(custom.detail?.invoiceNumber || null);
+      setPreselectedEntnahmeBelegForBelege(custom.detail?.entnahmeBelegNummer || null);
+    };
+
+    window.addEventListener('open-beleg-tab', handler as EventListener);
+    return () => window.removeEventListener('open-beleg-tab', handler as EventListener);
+  }, []);
+
   const handleApiTokenChange = (newToken: string) => {
     const trimmedToken = newToken.trim();
     setApiToken(trimmedToken); 
@@ -476,7 +491,7 @@ const App: React.FC = () => {
       const sortedTodoInYear = yearProducts
         .filter(p => {
             if (p.festgeschrieben === 1 || p.usageStatus.includes(ProductUsage.STORNIERT)) return false;
-            if (euerSettings.streuArtikelLimitActive && p.etv < euerSettings.streuArtikelLimitValue) {
+            if (isProductIgnoredForBelegAndEuer(p, euerSettings)) {
                 return false; 
             }
             return true;
@@ -513,7 +528,7 @@ const App: React.FC = () => {
       return { success: false, message: "Fehler: Wichtige Absenderdaten (Name, Adresse, USt-IdNr.) fehlen in den Beleg-Einstellungen." };
     }
 
-    if (euerSettings.streuArtikelLimitActive && productToFinalize.etv < euerSettings.streuArtikelLimitValue) {
+    if (isProductIgnoredForBelegAndEuer(productToFinalize, euerSettings)) {
       return { success: false, message: "Fehler: Streuartikel können nicht festgeschrieben werden." };
     }
 
@@ -642,7 +657,7 @@ const App: React.FC = () => {
     products.forEach(p => {
       const orderDate = parseDMYtoDate(p.date);
       if (orderDate && orderDate < thresholdDate && p.festgeschrieben !== 1) {
-        if (euerSettings.streuArtikelLimitActive && p.etv < euerSettings.streuArtikelLimitValue) {
+        if (isProductIgnoredForBelegAndEuer(p, euerSettings)) {
             return; 
         }
         productsToUpdate.push({
@@ -853,9 +868,11 @@ const App: React.FC = () => {
             onUpdateProduct={handleSaveProductDetails} 
             onExecuteFestschreiben={executeFestschreiben} 
             proposedInvoiceNumbers={proposedInvoiceNumbers} 
-            onSaveAndFinalizeProduct={handleSaveAndFinalizeProduct} 
+            onSaveAndFinalizeProduct={handleSaveAndFinalizeProduct}
             setAppFeedbackMessage={setFeedbackMessage}
             onExecuteBulkBelegFestschreiben={executeBulkBelegFestschreiben} 
+            preselectedInvoiceNumber={preselectedInvoiceNumberForBelege}
+            preselectedEntnahmeBelegNummer={preselectedEntnahmeBelegForBelege}
           />
         )}
         {activeTab === TAB_OPTIONS.SETTINGS && (
