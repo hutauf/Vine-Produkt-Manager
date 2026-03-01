@@ -30,6 +30,7 @@ export const DEFAULT_EUER_SETTINGS: EuerSettings = {
   defaultPrivatentnahmeDelay: "14d", // Default to 2 weeks
   ignoreETVZeroProducts: false, 
   useTeilwertV2: false, // Default for Teilwert v2 source
+  privatentnahmeSameYearAsOnlyIncome: false,
 };
 
 export const TAB_OPTIONS = {
