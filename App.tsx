@@ -211,7 +211,7 @@ const App: React.FC = () => {
       if (euerSettings.useTeilwertV2) {
         return {
           ...p,
-          teilwert: p.teilwert_v2,
+          teilwert: p.teilwert_v2 ?? p.teilwert,
           pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${p.ASIN}.pdf`,
         };
       } else {
