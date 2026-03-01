@@ -31,6 +31,7 @@ export const exportToXlsx = (data: Product[], filename: string) => {
     Privatentnahme_Datum: p.privatentnahmeDate, // TT.MM.JJJJ - Added
     Festgeschrieben: p.festgeschrieben === 1 ? 'Ja' : 'Nein', // New field
     Rechnungsnummer: p.rechnungsNummer, // New field
+    Entnahmebelegnummer: p.entnahmeBelegNummer,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(worksheetData);
