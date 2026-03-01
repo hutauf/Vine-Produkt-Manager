@@ -1,7 +1,6 @@
 
-import { Product, ProductUsage } from '../types';
+import { Product, ProductHistoryEntry, ProductUsage } from '../types';
 import { normalizeDateString } from './dateUtils'; // Import the new utility
-import { TEILWERT_V2_API_URL } from '../constants';
 
 
 // This is what the API expects for the 'value' part when stringified,
@@ -13,6 +12,7 @@ export interface ProductApiValue {
   etv: number;
   keepa?: number | null;
   teilwert: number | null; 
+  teilwert_v2?: number | null;
   pdf?: string;
   myTeilwert?: number | null;
   myTeilwertReason?: string;
@@ -23,6 +23,7 @@ export interface ProductApiValue {
   privatentnahmeDate?: string; // Format: TT.MM.JJJJ
   festgeschrieben?: 1; // New field
   rechnungsNummer?: string; // New field
+  entnahmeBelegNummer?: string;
 }
 
 // This is the structure of an entry as defined by the API for the main product database
@@ -96,7 +97,8 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ordernumber: apiValueFields.ordernumber,
     date: apiValueFields.date,
     etv: apiValueFields.etv,
-    teilwert: apiValueFields.teilwert, 
+    teilwert: apiValueFields.teilwert,
+    ...(apiValueFields.teilwert_v2 !== undefined && { teilwert_v2: apiValueFields.teilwert_v2 }),
     usageStatus: apiValueFields.usageStatus,
     ...(apiValueFields.keepa !== undefined && { keepa: apiValueFields.keepa }),
     ...(apiValueFields.pdf !== undefined && { pdf: apiValueFields.pdf }),
@@ -108,6 +110,7 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ...(apiValueFields.privatentnahmeDate !== undefined && { privatentnahmeDate: apiValueFields.privatentnahmeDate }),
     ...(apiValueFields.festgeschrieben !== undefined && { festgeschrieben: apiValueFields.festgeschrieben }),
     ...(apiValueFields.rechnungsNummer !== undefined && { rechnungsNummer: apiValueFields.rechnungsNummer }),
+    ...(apiValueFields.entnahmeBelegNummer !== undefined && { entnahmeBelegNummer: apiValueFields.entnahmeBelegNummer }),
   };
   return apiValue;
 };
@@ -125,21 +128,22 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       name: valueData.name || 'N/A',
       ordernumber: valueData.ordernumber || 'N/A',
       date: normalizedOrderDate, 
-      etv: typeof valueData.etv === 'number' ? valueData.etv : 0,
-      keepa: typeof valueData.keepa === 'number' ? valueData.keepa : null,
-      teilwert: typeof valueData.teilwert === 'number' ? valueData.teilwert : null, 
-      teilwert_v2: typeof valueData.teilwert_v2 === 'number' ? valueData.teilwert_v2 : null, 
+      etv: parseNullableNumber(valueData.etv) ?? 0,
+      keepa: parseNullableNumber(valueData.keepa),
+      teilwert: parseNullableNumber(valueData.teilwert),
+      teilwert_v2: parseNullableNumber(valueData.teilwert_v2),
       pdf: valueData.pdf || undefined,
-      myTeilwert: typeof valueData.myTeilwert === 'number' ? valueData.myTeilwert : null,
+      myTeilwert: parseNullableNumber(valueData.myTeilwert),
       myTeilwertReason: valueData.myTeilwertReason || '',
       usageStatus: Array.isArray(valueData.usageStatus) ? valueData.usageStatus : [],
-      salePrice: typeof valueData.salePrice === 'number' ? valueData.salePrice : null,
+      salePrice: parseNullableNumber(valueData.salePrice),
       saleDate: valueData.saleDate || undefined, 
       buyerAddress: valueData.buyerAddress || undefined,
       privatentnahmeDate: valueData.privatentnahmeDate || undefined, 
       last_update_time: typeof apiEntry.last_update_time === 'number' ? apiEntry.last_update_time : 0,
       festgeschrieben: valueData.festgeschrieben === 1 ? 1 : undefined,
       rechnungsNummer: valueData.rechnungsNummer || undefined, 
+      entnahmeBelegNummer: valueData.entnahmeBelegNummer || undefined,
     };
 
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(product.date)) {
@@ -158,7 +162,7 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
     console.error(`Failed to parse product value for ASIN ${apiEntry.ASIN}:`, e.message, `Value: "${apiEntry.value}"`);
     return {
       ASIN: apiEntry.ASIN, name: 'Error: Corrupted Data', ordernumber: 'N/A', date: '01/01/1970',
-      etv: 0, teilwert: null, usageStatus: [], last_update_time: apiEntry.last_update_time || 0,
+      etv: 0, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: apiEntry.last_update_time || 0,
     };
   }
 };
@@ -238,4 +242,12 @@ export const apiGetAsinHistory = async (baseUrl: string, token: string, asin: st
   const body = { token, request: "get_asin_history", payload: { ASIN: asin } };
   const response = await fetchApiPost<ProductHistoryEntry[]>(baseUrl, body);
   return response;
+};
+const parseNullableNumber = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value.replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 };
