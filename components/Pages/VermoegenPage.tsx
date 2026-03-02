@@ -26,7 +26,17 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0; // <--- MODIFIED HERE
+  const getCalculatedTeilwert = (product: Product): number => {
+    const result = product.myTeilwert ?? product.teilwert ?? 0;
+    if (product.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][VermoegenPage:getCalculatedTeilwert] ASIN B0DCG9SX4D in Vermögen-Berechnung', {
+        myTeilwert: product.myTeilwert,
+        teilwert: product.teilwert,
+        result,
+      });
+    }
+    return result;
+  };
 
   const umlaufvermoegen = useMemo(() => {
     return products

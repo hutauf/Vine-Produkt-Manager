@@ -120,6 +120,13 @@ const productToApiValue = (product: Product): ProductApiValue => {
 const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
   try {
     const valueData = JSON.parse(apiEntry.value) as Partial<ProductApiValue>; 
+    if (apiEntry.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][apiEntryToProduct:raw] ASIN B0DCG9SX4D raw value parsed', {
+        teilwert_raw: valueData.teilwert,
+        teilwert_v2_raw: valueData.teilwert_v2,
+        myTeilwert_raw: valueData.myTeilwert,
+      });
+    }
 
     const normalizedOrderDate = normalizeDateString(valueData.date, 'order date from API', apiEntry.ASIN);
     
@@ -145,6 +152,14 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       rechnungsNummer: valueData.rechnungsNummer || undefined, 
       entnahmeBelegNummer: valueData.entnahmeBelegNummer || undefined,
     };
+
+    if (product.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][apiEntryToProduct:normalized] ASIN B0DCG9SX4D nach parseNullableNumber', {
+        teilwert: product.teilwert,
+        teilwert_v2: product.teilwert_v2,
+        myTeilwert: product.myTeilwert,
+      });
+    }
 
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(product.date)) {
         console.warn(`Product ${product.ASIN} has an unexpected order date format ('${product.date}') AFTER normalization. Expected DD/MM/YYYY. This indicates a deeper issue.`);

@@ -36,6 +36,13 @@ const ProductTable: React.FC<ProductTableProps> = ({
   const [itemsPerPage, setItemsPerPage] = useState(ITEMS_PER_PAGE_OPTIONS[1]);
 
   const getCalculatedTeilwert = (product: Product): number => {
+    if (product.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][ProductTable:getCalculatedTeilwert] ASIN B0DCG9SX4D in Tabellen-Berechnung', {
+        myTeilwert: product.myTeilwert,
+        teilwert: product.teilwert,
+        result: product.myTeilwert ?? product.teilwert ?? 0,
+      });
+    }
     if (product.myTeilwert != null) return product.myTeilwert;
     if (product.teilwert != null) return product.teilwert;
     return 0;
@@ -217,7 +224,7 @@ const ProductTable: React.FC<ProductTableProps> = ({
                       <>
                         {item.myTeilwert.toFixed(2)} €<sup>m</sup>
                       </>
-                    ) : (item.teilwert != null ? `${item.teilwert.toFixed(2)} €` : 'N/A')}
+                    ) : (item.teilwert != null ? `${item.teilwert.toFixed(2)} €` : (item.ASIN === 'B0DCG9SX4D' ? (console.log('[TW-DEBUG][ProductTable:render-fallback] ASIN B0DCG9SX4D rendert N/A, weil teilwert == null und myTeilwert == null', { teilwert: item.teilwert, myTeilwert: item.myTeilwert }), 'N/A') : 'N/A'))}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-300">
                   {item.festgeschrieben === 1 ? <span className="text-green-400 font-semibold">Festgeschr.</span> : (item.usageStatus.length > 0 ? item.usageStatus.join(', ') : '-')}

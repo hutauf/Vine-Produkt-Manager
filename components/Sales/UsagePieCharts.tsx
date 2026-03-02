@@ -57,8 +57,18 @@ const UsagePieCharts: React.FC<UsagePieChartsProps> = ({ products, selectedYear 
       [ProductUsage.DEFEKT]: { etv: 0, teilwert: 0, count: 0 },
     };
 
-    const getTeilwert = (p: Product) =>
-      p.myTeilwert != null ? p.myTeilwert : p.teilwert != null ? p.teilwert : p.etv;
+    const getTeilwert = (p: Product) => {
+      const result = p.myTeilwert != null ? p.myTeilwert : p.teilwert != null ? p.teilwert : p.etv;
+      if (p.ASIN === 'B0DCG9SX4D') {
+        console.log('[TW-DEBUG][UsagePieCharts:getTeilwert] ASIN B0DCG9SX4D in Verteilungsdiagramm', {
+          myTeilwert: p.myTeilwert,
+          teilwert: p.teilwert,
+          etv: p.etv,
+          result,
+        });
+      }
+      return result;
+    };
 
     filtered.forEach(p => {
       let category: ProductUsage = ProductUsage.PRIVATENTNAHME;

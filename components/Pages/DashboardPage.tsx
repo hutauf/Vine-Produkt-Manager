@@ -59,6 +59,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   }, [hideFinalized]);
 
   const getCalculatedTeilwert = (product: Product): number => {
+    if (product.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][DashboardPage:getCalculatedTeilwert] ASIN B0DCG9SX4D in Dashboard-Berechnung', {
+        myTeilwert: product.myTeilwert,
+        teilwert: product.teilwert,
+        result: product.myTeilwert ?? product.teilwert ?? 0,
+      });
+    }
     if (product.myTeilwert != null) return product.myTeilwert;
     if (product.teilwert != null) return product.teilwert;
     return 0;
