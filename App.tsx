@@ -180,9 +180,32 @@ const App: React.FC = () => {
       console.log('Loaded products from server', serverResponse.data.length);
       let serverProducts = serverResponse.data;
       const localProductsMap = new Map(products.map(p => [p.ASIN, p]));
+      const debugAsin = 'B0DCG9SX4D';
+      const localDebugProduct = localProductsMap.get(debugAsin);
+      if (localDebugProduct) {
+        console.log('[TW-DEBUG][loadProductData:local-before-merge] ASIN B0DCG9SX4D lokal vor Merge', {
+          teilwert: localDebugProduct.teilwert,
+          teilwert_v2: localDebugProduct.teilwert_v2,
+          myTeilwert: localDebugProduct.myTeilwert,
+          last_update_time: localDebugProduct.last_update_time,
+        });
+      }
       
       serverProducts.forEach(serverP => {
         const localP = localProductsMap.get(serverP.ASIN);
+        if (serverP.ASIN === debugAsin) {
+          console.log('[TW-DEBUG][loadProductData:server-vs-local] ASIN B0DCG9SX4D beim Merge-Abgleich', {
+            server_teilwert: serverP.teilwert,
+            server_teilwert_v2: serverP.teilwert_v2,
+            server_myTeilwert: serverP.myTeilwert,
+            server_last_update_time: serverP.last_update_time,
+            local_teilwert: localP?.teilwert ?? null,
+            local_teilwert_v2: localP?.teilwert_v2 ?? null,
+            local_myTeilwert: localP?.myTeilwert ?? null,
+            local_last_update_time: localP?.last_update_time ?? null,
+            takesServer: !localP || (serverP.last_update_time || 0) >= (localP.last_update_time || 0),
+          });
+        }
         if (!localP || (serverP.last_update_time || 0) >= (localP.last_update_time || 0)) {
           localProductsMap.set(serverP.ASIN, serverP);
         }
@@ -209,12 +232,25 @@ const App: React.FC = () => {
     // Apply Teilwert V2 data if setting is active
     processedProducts = processedProducts.map(p => {
       if (euerSettings.useTeilwertV2) {
+        if (p.ASIN === 'B0DCG9SX4D') {
+          console.log('[TW-DEBUG][loadProductData:v2-switch-on] ASIN B0DCG9SX4D Teilwert-Auswahl bei useTeilwertV2=true', {
+            alter_teilwert: p.teilwert,
+            teilwert_v2: p.teilwert_v2,
+            neuer_teilwert: p.teilwert_v2 ?? p.teilwert,
+          });
+        }
         return {
           ...p,
           teilwert: p.teilwert_v2 ?? p.teilwert,
           pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${p.ASIN}.pdf`,
         };
       } else {
+        if (p.ASIN === 'B0DCG9SX4D') {
+          console.log('[TW-DEBUG][loadProductData:v2-switch-off] ASIN B0DCG9SX4D Teilwert-Auswahl bei useTeilwertV2=false', {
+            teilwert_bleibt: p.teilwert,
+            teilwert_v2: p.teilwert_v2,
+          });
+        }
         return {
           ...p,
           pdf: `https://hutauf.org/oracle2/files/PTWMETWS_${p.ASIN}.pdf`,
@@ -224,11 +260,25 @@ const App: React.FC = () => {
     
     // Apply ignoreETVZeroProducts filter
     if (euerSettings.ignoreETVZeroProducts) {
+      const debugProductBeforeFilter = processedProducts.find(p => p.ASIN === 'B0DCG9SX4D');
+      if (debugProductBeforeFilter) {
+        console.log('[TW-DEBUG][loadProductData:before-etv-filter] ASIN B0DCG9SX4D vor ignoreETVZeroProducts-Filter', {
+          etv: debugProductBeforeFilter.etv,
+          teilwert: debugProductBeforeFilter.teilwert,
+        });
+      }
       processedProducts = processedProducts.filter(p => p.etv !== 0);
     }
 
     const sortedFinalProducts = processedProducts.sort((a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
     setProducts(sortedFinalProducts);
+    const finalDebugProduct = sortedFinalProducts.find(p => p.ASIN === 'B0DCG9SX4D');
+    console.log('[TW-DEBUG][loadProductData:final-state] ASIN B0DCG9SX4D final im State?', {
+      exists: !!finalDebugProduct,
+      teilwert: finalDebugProduct?.teilwert ?? null,
+      teilwert_v2: finalDebugProduct?.teilwert_v2 ?? null,
+      myTeilwert: finalDebugProduct?.myTeilwert ?? null,
+    });
     console.log('Final products after load', sortedFinalProducts.map(p => ({ ASIN: p.ASIN, teilwert: p.teilwert, pdf: p.pdf })));
     
     if (serverResponse.status === 'success' && !euerSettings.useTeilwertV2) { // If V2 wasn't even attempted.

@@ -18,9 +18,16 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
   const [selectedPlotYear, setSelectedPlotYear] = useState<string>(new Date().getFullYear().toString());
 
   const getCalculatedTeilwert = (product: Product): number => {
-    if (product.myTeilwert != null) return product.myTeilwert;
-    if (product.teilwert != null) return product.teilwert;
-    return product.etv; // Fallback to ETV if no teilwert
+    const result = product.myTeilwert != null ? product.myTeilwert : product.teilwert != null ? product.teilwert : product.etv;
+    if (product.ASIN === 'B0DCG9SX4D') {
+      console.log('[TW-DEBUG][SalesPage:getCalculatedTeilwert] ASIN B0DCG9SX4D in Sales-Berechnung', {
+        myTeilwert: product.myTeilwert,
+        teilwert: product.teilwert,
+        etv: product.etv,
+        result,
+      });
+    }
+    return result;
   };
 
   const allSoldProducts = useMemo(() => {

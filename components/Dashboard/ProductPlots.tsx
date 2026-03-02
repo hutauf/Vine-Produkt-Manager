@@ -38,7 +38,16 @@ const ProductPlots: React.FC<ProductPlotsProps> = ({ products, yearFilter }) => 
         monthlyAggregates[monthKey] = { etv: 0, teilwert: 0, dateObj: new Date(year, month, 1) };
       }
       monthlyAggregates[monthKey].etv += p.etv;
-      monthlyAggregates[monthKey].teilwert += (p.myTeilwert ?? p.teilwert ?? 0); // <--- MODIFIED HERE
+      const teilwertForPlot = p.myTeilwert ?? p.teilwert ?? 0;
+      if (p.ASIN === 'B0DCG9SX4D') {
+        console.log('[TW-DEBUG][ProductPlots:cumulative] ASIN B0DCG9SX4D fließt in kumulativen Teilwert ein', {
+          myTeilwert: p.myTeilwert,
+          teilwert: p.teilwert,
+          addedToPlot: teilwertForPlot,
+          monthKey,
+        });
+      }
+      monthlyAggregates[monthKey].teilwert += teilwertForPlot;
     });
 
     const dataForChart: { month: string, cumulativeEtv: number, cumulativeTeilwert: number }[] = [];
