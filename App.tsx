@@ -23,6 +23,41 @@ const API_TOKEN_STORAGE_KEY = 'vineApp_apiToken';
 const EUER_SETTINGS_STORAGE_KEY = 'vineApp_euerSettings';
 const PRODUCTS_STORAGE_KEY = 'vineApp_products';
 
+const CLIENT_EDITABLE_FIELDS: Array<keyof Product> = [
+  'usageStatus',
+  'myTeilwert',
+  'myTeilwertReason',
+  'salePrice',
+  'saleDate',
+  'buyerAddress',
+  'privatentnahmeDate',
+  'festgeschrieben',
+  'rechnungsNummer',
+  'entnahmeBelegNummer',
+];
+
+const mergeServerAndLocalProduct = (serverProduct: Product, localProduct?: Product): Product => {
+  if (!localProduct) {
+    return serverProduct;
+  }
+
+  const serverTimestamp = serverProduct.last_update_time || 0;
+  const localTimestamp = localProduct.last_update_time || 0;
+  const shouldKeepLocalEditableFields = localTimestamp > serverTimestamp;
+
+  if (!shouldKeepLocalEditableFields) {
+    return serverProduct;
+  }
+
+  const mergedProduct: Product = { ...serverProduct };
+  CLIENT_EDITABLE_FIELDS.forEach((field) => {
+    (mergedProduct[field] as Product[typeof field]) = localProduct[field];
+  });
+
+  mergedProduct.last_update_time = localTimestamp;
+  return mergedProduct;
+};
+
 const App: React.FC = () => {
   const [apiToken, setApiToken] = useState<string | null>(() => localStorage.getItem(API_TOKEN_STORAGE_KEY));
   const [apiBaseUrl, setApiBaseUrlState] = useState<string>(() => localStorage.getItem(API_BASE_URL_STORAGE_KEY) || DEFAULT_API_BASE_URL);
@@ -180,14 +215,20 @@ const App: React.FC = () => {
       console.log('Loaded products from server', serverResponse.data.length);
       let serverProducts = serverResponse.data;
       const localProductsMap = new Map(products.map(p => [p.ASIN, p]));
-      
+      const mergedProductsMap = new Map<string, Product>();
+
       serverProducts.forEach(serverP => {
         const localP = localProductsMap.get(serverP.ASIN);
-        if (!localP || (serverP.last_update_time || 0) >= (localP.last_update_time || 0)) {
-          localProductsMap.set(serverP.ASIN, serverP);
+        mergedProductsMap.set(serverP.ASIN, mergeServerAndLocalProduct(serverP, localP));
+      });
+
+      localProductsMap.forEach((localP, asin) => {
+        if (!mergedProductsMap.has(asin)) {
+          mergedProductsMap.set(asin, localP);
         }
       });
-      processedProducts = Array.from(localProductsMap.values());
+
+      processedProducts = Array.from(mergedProductsMap.values());
       // Initial success message before V2 data, if any
       setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen (${processedProducts.length}). Verarbeite Teilwert V2...`, type: 'info' });
 
