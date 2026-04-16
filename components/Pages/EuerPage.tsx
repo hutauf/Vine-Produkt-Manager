@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { ProductUsage, EuerPageProps, EuerSettings } from '../../types';
-import { FaCalculator, FaCog, FaInfoCircle } from 'react-icons/fa';
+import { FaCalculator, FaCog, FaFileExcel, FaFilePdf, FaInfoCircle } from 'react-icons/fa';
 import { parseGermanDate } from '../../utils/dateUtils';
 import { DEFAULT_PRIVATENTNAHME_DELAY_OPTIONS } from '../../constants';
 import { isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 import { getProductBookingEntries } from '../../utils/bookingUtils';
+import { buildEuerExportRows, exportEuerRowsToPdf, exportEuerRowsToXlsx } from '../../utils/euerExport';
 
 const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChange, additionalExpenses }) => {
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
@@ -116,6 +117,24 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
   };
 
+  const handleExportXlsx = () => {
+    const rows = buildEuerExportRows(products, settings, selectedYear);
+    if (!rows.length) {
+      alert(`Keine produktbezogenen EÜR-Daten für ${selectedYear} gefunden.`);
+      return;
+    }
+    exportEuerRowsToXlsx(rows, selectedYear);
+  };
+
+  const handleExportPdf = () => {
+    const rows = buildEuerExportRows(products, settings, selectedYear);
+    if (!rows.length) {
+      alert(`Keine produktbezogenen EÜR-Daten für ${selectedYear} gefunden.`);
+      return;
+    }
+    exportEuerRowsToPdf(rows, selectedYear);
+  };
+
   return (
     <div className="space-y-8">
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
@@ -223,9 +242,31 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       </div>
 
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
-        <h2 className="text-2xl font-semibold text-gray-100 mb-6 flex items-center">
-          <FaCalculator className="mr-3 text-sky-400" /> Einnahmenüberschussrechnung für {euerData.year}
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-3">
+          <h2 className="text-2xl font-semibold text-gray-100 flex items-center">
+            <FaCalculator className="mr-3 text-sky-400" /> Einnahmenüberschussrechnung für {euerData.year}
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportXlsx}
+              className="inline-flex items-center px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors"
+              title={`EÜR Details ${selectedYear} als XLSX exportieren`}
+            >
+              <FaFileExcel className="mr-2" />
+              XLSX Export
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="inline-flex items-center px-3 py-2 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-sm font-medium transition-colors"
+              title={`EÜR Details ${selectedYear} als PDF exportieren`}
+            >
+              <FaFilePdf className="mr-2" />
+              PDF Export
+            </button>
+          </div>
+        </div>
         <div className="space-y-4">
           <div className="p-3 bg-slate-700 rounded-md">
             <div className="flex justify-between items-center">
