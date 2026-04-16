@@ -26,7 +26,7 @@ export const getProductBookingEntries = (product: Product, settings: EuerSetting
   const isLagerOrBusiness = product.usageStatus.includes(ProductUsage.LAGER) || product.usageStatus.includes(ProductUsage.BETRIEBLICHE_NUTZUNG);
   const sameYearPrivateOnlyMode = Boolean(
     settings.privatentnahmeSameYearAsOnlyIncome &&
-    product.usageStatus.includes(ProductUsage.PRIVATENTNAHME) &&
+    isPrivatentnahmeOrDefault &&
     effectivePrivatentnahmeDate &&
     effectivePrivatentnahmeDate.getUTCFullYear() === orderDate.getUTCFullYear()
   );
