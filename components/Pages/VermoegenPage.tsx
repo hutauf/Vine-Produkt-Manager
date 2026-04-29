@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '../../types';
 import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
@@ -8,11 +8,16 @@ import CreateShopModal from '../Shop/CreateShopModal';
 import PublishedUrlModal from '../Shop/PublishedUrlModal';
 import { generateShopHtml } from '../../utils/shopGenerator';
 import EditProductModal from '../Products/EditProductModal';
+import ScannerPanel from '../Scanner/ScannerPanel';
+import StorageLocationManager from '../Storage/StorageLocationManager';
+import LocationInventoryAuditView from '../Storage/LocationInventoryAuditView';
+import Modal from '../Common/Modal';
+import { deleteStorageLocation, listStorageLocations, StorageLocationEntry, UpdateStorageLocationInput, updateStorageLocations } from '../../utils/storageLocationService';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
 
-const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings, onOpenBelegeTab }) => {
+const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings, apiToken, apiBaseUrl, onOpenBelegeTab }) => {
   const [productSortKey, setProductSortKey] = useState<ProductSortKey>('date');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('desc');
   
@@ -25,6 +30,44 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [locations, setLocations] = useState<StorageLocationEntry[]>([]);
+  const [activeAuditLocation, setActiveAuditLocation] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      if (!apiToken) {
+        setLocations([]);
+        setActiveAuditLocation(null);
+        return;
+      }
+      const response = await listStorageLocations(apiBaseUrl, apiToken);
+      if (response.status === 'success' && response.data) {
+        setLocations(response.data);
+      }
+    };
+    loadLocations();
+  }, [apiBaseUrl, apiToken]);
+
+  const handleSaveLocations = async (entries: UpdateStorageLocationInput[]) => {
+    if (!apiToken) return;
+    const response = await updateStorageLocations(apiBaseUrl, apiToken, entries);
+    if (response.status === 'success') {
+      const reloaded = await listStorageLocations(apiBaseUrl, apiToken);
+      if (reloaded.status === 'success' && reloaded.data) setLocations(reloaded.data);
+    } else {
+      alert(response.message || 'Fehler beim Speichern der Lagerorte.');
+    }
+  };
+
+  const handleDeleteLocation = async (locationId: string) => {
+    if (!apiToken) return;
+    const response = await deleteStorageLocation(apiBaseUrl, apiToken, locationId);
+    if (response.status === 'success') {
+      setLocations((prev) => prev.filter((loc) => loc.location_id !== locationId));
+    } else {
+      alert(response.message || 'Fehler beim Löschen des Lagerortes.');
+    }
+  };
 
   const hasTeilwert = (product: Product): boolean => product.myTeilwert != null || product.teilwert != null;
   const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0;
@@ -264,6 +307,18 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   return (
     <div className="space-y-8">
+      <ScannerPanel title="Scanner (Vermögen/Lager)" helpText="Scannt Produktcodes und startet Routing/Verknüpfung je nach Treffer." onDetected={(code) => console.log('Vermögen scan detected:', code)} />
+      <StorageLocationManager
+        locations={locations}
+        products={products}
+        onSave={handleSaveLocations}
+        onDelete={handleDeleteLocation}
+        onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
+        onPrintLabel={(locationId) => console.log('Print location label:', locationId)}
+      />
+      <Modal isOpen={!!activeAuditLocation} onClose={() => setActiveAuditLocation(null)} title={`Inventur · ${activeAuditLocation ?? ''}`} size="lg">
+        {activeAuditLocation && <LocationInventoryAuditView locationId={activeAuditLocation} products={products} />}
+      </Modal>
       {renderProductTable(umlaufvermoegen, "Umlaufvermögen", <FaArchive className="mr-3 text-sky-400"/>, true, sumETVUmlauf, sumTeilwertUmlauf, "Umlaufvermögen")}
       {renderProductTable(anlagenverzeichnis, "Anlagenverzeichnis", <FaBuilding className="mr-3 text-sky-400"/>, true, sumETVAnlage, sumTeilwertAnlage, "Anlagenverzeichnis")}
       

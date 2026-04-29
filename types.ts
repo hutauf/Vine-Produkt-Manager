@@ -30,6 +30,7 @@ export interface Product {
   festgeschrieben?: 1;
   rechnungsNummer?: string;
   entnahmeBelegNummer?: string;
+  storageLocationId?: string;
 }
 
 
@@ -89,6 +90,8 @@ export interface VermoegenPageProps {
   onUpdateProduct: (product: Product) => Promise<void>;
   euerSettings: EuerSettings;
   belegSettings: BelegSettings;
+  apiToken: string | null;
+  apiBaseUrl: string;
   onOpenBelegeTab?: (options: { invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string }) => void;
 }
 

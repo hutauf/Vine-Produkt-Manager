@@ -886,6 +886,8 @@ const App: React.FC = () => {
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
+            apiToken={apiToken}
+            apiBaseUrl={apiBaseUrl}
             onOpenBelegeTab={handleOpenBelegeTab}
           />
         )}
