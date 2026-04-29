@@ -13,7 +13,7 @@ import StorageLocationManager from '../Storage/StorageLocationManager';
 import LocationInventoryAuditView from '../Storage/LocationInventoryAuditView';
 import Modal from '../Common/Modal';
 import { deleteStorageLocation, listStorageLocations, StorageLocationEntry, UpdateStorageLocationInput, updateStorageLocations } from '../../utils/storageLocationService';
-import { generateLabelPdf } from '../../utils/labelPdfGenerator';
+import { downloadLabelPdf } from '../../utils/labelPdfGenerator';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
@@ -86,11 +86,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   };
 
   const handlePrintLabel = async (locationId: string, options: { withMeta: boolean }) => {
-    const pdfDataUri = await generateLabelPdf({ type: 'location', id: locationId, meta: options.withMeta });
-    const win = window.open();
-    if (win) {
-      win.document.write(`<iframe src="${pdfDataUri}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
-    }
+    await downloadLabelPdf({ type: 'location', id: locationId, meta: options.withMeta }, `Lagerort_${locationId}.pdf`);
   };
 
   const hasTeilwert = (product: Product): boolean => product.myTeilwert != null || product.teilwert != null;
