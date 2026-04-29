@@ -13,6 +13,7 @@ import StorageLocationManager from '../Storage/StorageLocationManager';
 import LocationInventoryAuditView from '../Storage/LocationInventoryAuditView';
 import Modal from '../Common/Modal';
 import { deleteStorageLocation, listStorageLocations, StorageLocationEntry, UpdateStorageLocationInput, updateStorageLocations } from '../../utils/storageLocationService';
+import { generateLabelPdf } from '../../utils/labelPdfGenerator';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
@@ -66,6 +67,29 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
       setLocations((prev) => prev.filter((loc) => loc.location_id !== locationId));
     } else {
       alert(response.message || 'Fehler beim Löschen des Lagerortes.');
+    }
+  };
+
+  const handleScan = (code: string) => {
+    const product = products.find(p => p.ASIN === code || (p.barcodes && p.barcodes.includes(code)));
+    if (product) {
+      setEditingProduct(product);
+    } else {
+      // Check if it's a storage location maybe?
+      const location = locations.find(loc => loc.location_id === code);
+      if (location) {
+        setActiveAuditLocation(location.location_id);
+      } else {
+        alert(`Code ${code} ist unbekannt. Kein Produkt oder Lagerort gefunden.`);
+      }
+    }
+  };
+
+  const handlePrintLabel = async (locationId: string, options: { withMeta: boolean }) => {
+    const pdfDataUri = await generateLabelPdf({ type: 'location', id: locationId, meta: options.withMeta });
+    const win = window.open();
+    if (win) {
+      win.document.write(`<iframe src="${pdfDataUri}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
     }
   };
 
@@ -307,14 +331,14 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   return (
     <div className="space-y-8">
-      <ScannerPanel title="Scanner (Vermögen/Lager)" helpText="Scannt Produktcodes und startet Routing/Verknüpfung je nach Treffer." onDetected={(code) => console.log('Vermögen scan detected:', code)} />
+      <ScannerPanel title="Scanner (Vermögen/Lager)" helpText="Scannt Produktcodes (öffnet Detail) oder Lagerort-Codes (öffnet Inventur)." onDetected={handleScan} />
       <StorageLocationManager
         locations={locations}
         products={products}
         onSave={handleSaveLocations}
         onDelete={handleDeleteLocation}
         onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
-        onPrintLabel={(locationId) => console.log('Print location label:', locationId)}
+        onPrintLabel={handlePrintLabel}
       />
       <Modal isOpen={!!activeAuditLocation} onClose={() => setActiveAuditLocation(null)} title={`Inventur · ${activeAuditLocation ?? ''}`} size="lg">
         {activeAuditLocation && <LocationInventoryAuditView locationId={activeAuditLocation} products={products} />}

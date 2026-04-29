@@ -16,6 +16,9 @@ import ConfirmGoBDChangeModal from '../Common/ConfirmGoBDChangeModal';
 import { apiGetAsinHistory } from '../../utils/apiService';
 import { isProductIgnoredByStreuartikel } from '../../utils/euerUtils';
 import { formatBookingDate, getProductBookingEntries } from '../../utils/bookingUtils';
+import { generateLabelPdf } from '../../utils/labelPdfGenerator';
+import { listStorageLocations, StorageLocationEntry } from '../../utils/storageLocationService';
+import ScannerPanel from '../Scanner/ScannerPanel';
 
 interface EditProductModalProps {
   product: Product;
@@ -56,7 +59,11 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
     saleDate: product.saleDate ?? '',
     privatentnahmeDate: product.privatentnahmeDate ?? '',
     buyerAddress: product.buyerAddress ?? '',
+    barcodes: product.barcodes ?? [],
+    storageLocationId: product.storageLocationId ?? '',
   });
+  
+  const [locations, setLocations] = useState<StorageLocationEntry[]>([]);
   
   const [modalError, setModalError] = useState<string | null>(null);
   const [showGoBDConfirmModal, setShowGoBDConfirmModal] = useState(false);
@@ -78,6 +85,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         saleDate: product.saleDate ?? '',
         privatentnahmeDate: product.privatentnahmeDate ?? '',
         buyerAddress: product.buyerAddress ?? '',
+        barcodes: product.barcodes ?? [],
+        storageLocationId: product.storageLocationId ?? '',
       });
       setModalError(null);
       setShowGoBDConfirmModal(false);
@@ -86,6 +95,10 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       setIsSavingAndFinalizing(false);
 
       if (apiToken && apiBaseUrl) {
+        listStorageLocations(apiBaseUrl, apiToken).then(res => {
+          if (res.status === 'success' && res.data) setLocations(res.data);
+        });
+
         setHistoryLoading(true);
         setHistoryError(null);
         apiGetAsinHistory(apiBaseUrl, apiToken, product.ASIN)
@@ -139,7 +152,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
   };
 
   const buildUpdatedProduct = (): Product => {
-    const { myTeilwert, myTeilwertReason, usageStatus, salePrice, saleDate, privatentnahmeDate, buyerAddress } = formData;
+    const { myTeilwert, myTeilwertReason, usageStatus, salePrice, saleDate, privatentnahmeDate, buyerAddress, barcodes, storageLocationId } = formData;
     const isSold = usageStatus.includes(ProductUsage.VERKAUFT);
     const salePriceValue = salePrice.trim();
 
@@ -152,6 +165,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
       saleDate: isSold && saleDate !== '' ? saleDate : undefined,
       buyerAddress: isSold ? buyerAddress : undefined,
       privatentnahmeDate: privatentnahmeDate !== '' ? privatentnahmeDate : undefined,
+      barcodes: barcodes.length > 0 ? barcodes : undefined,
+      storageLocationId: storageLocationId !== '' ? storageLocationId : undefined,
     };
   };
 
@@ -351,6 +366,61 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </>
         )}
+
+        <hr className="border-slate-600 my-4" />
+        <h4 className="text-md font-semibold text-gray-200 mb-2">Lager & Barcodes</h4>
+        <div>
+          <label className="block text-sm font-medium text-gray-300">Lagerort</label>
+          <div className="flex gap-2">
+            <select
+              value={formData.storageLocationId}
+              onChange={(e) => handleChange('storageLocationId', e.target.value)}
+              className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+            >
+              <option value="">Kein Lagerort</option>
+              {locations.map(loc => (
+                <option key={loc.location_id} value={loc.location_id}>{loc.location_id}</option>
+              ))}
+            </select>
+            <input 
+              type="text" 
+              placeholder="Oder Freitext..." 
+              value={formData.storageLocationId}
+              onChange={(e) => handleChange('storageLocationId', e.target.value)}
+              className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+            />
+          </div>
+        </div>
+        
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-300 mb-1">Verknüpfte Barcodes</label>
+          {formData.barcodes.length > 0 ? (
+            <ul className="list-disc pl-5 text-gray-300 text-sm mb-2">
+              {formData.barcodes.map(code => (
+                <li key={code} className="flex justify-between items-center py-1">
+                  {code} 
+                  <button type="button" onClick={() => handleChange('barcodes', formData.barcodes.filter(c => c !== code))} className="text-red-400 hover:text-red-300 ml-2">Entfernen</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-gray-500 mb-2">Keine Barcodes verknüpft.</p>}
+          <ScannerPanel 
+            title="Neuen Code scannen" 
+            helpText="Scannen Sie einen Barcode oder QR-Code, um ihn diesem Produkt zuzuordnen."
+            onDetected={(code) => {
+              if (!formData.barcodes.includes(code) && code !== product.ASIN) {
+                handleChange('barcodes', [...formData.barcodes, code]);
+              }
+            }}
+          />
+        </div>
+        <div className="mt-4">
+          <Button type="button" variant="secondary" onClick={async () => {
+             const pdfUrl = await generateLabelPdf({ type: 'product', id: product.ASIN, meta: true, name: product.name });
+             const win = window.open();
+             if (win) win.document.write(`<iframe src="${pdfUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+          }}>Etikett drucken (ASIN)</Button>
+        </div>
 
         <hr className="border-slate-600 my-4" />
         <h4 className="text-md font-semibold text-gray-200 mb-2">Belegzuordnung</h4>

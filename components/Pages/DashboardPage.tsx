@@ -7,6 +7,7 @@ import ProductPlots from '../Dashboard/ProductPlots';
 import { FaFilter, FaTimes, FaSearch } from 'react-icons/fa';
 import { parseDMYtoDate } from '../../utils/dateUtils';
 import ScannerPanel from '../Scanner/ScannerPanel';
+import EditProductModal from '../Products/EditProductModal';
 
 interface DashboardPageProps {
   products: Product[];
@@ -46,6 +47,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   });
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [isLoadingUpload, setIsLoadingUpload] = useState<boolean>(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+  const handleScan = (code: string) => {
+    const product = products.find(p => p.ASIN === code || (p.barcodes && p.barcodes.includes(code)));
+    if (product) {
+      setEditingProduct(product);
+    } else {
+      alert(`Code ${code} ist unbekannt. Bitte suchen Sie zuerst das Produkt und weisen Sie den Code zu.`);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem(DASHBOARD_YEAR_FILTER_KEY, yearFilter);
@@ -213,10 +224,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="mb-4">
           <ScannerPanel
             title="Scanner (Dashboard)"
-            helpText="Scannt EAN/FNSKU. Bei Treffer: Produktdetail öffnen. Bei unbekanntem Code: ASIN-Verknüpfungsdialog öffnen."
-            onDetected={(code) => {
-              console.log('Dashboard scan detected:', code);
-            }}
+            helpText="Scannt Barcodes oder QR-Codes. Bei Treffer wird das Produktdetail geöffnet."
+            onDetected={handleScan}
           />
         </div>
         <h2 className="text-2xl font-semibold text-gray-100 mb-4">Produktliste ({filteredProducts.length})</h2>
@@ -240,6 +249,23 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
         )}
       </div>
+
+      {editingProduct && (
+        <EditProductModal
+          product={editingProduct}
+          isOpen={!!editingProduct}
+          onClose={() => setEditingProduct(null)}
+          onSave={async updated => {
+            await onUpdateProduct(updated);
+            setEditingProduct(null);
+          }}
+          onSaveAndFinalize={onSaveAndFinalizeProduct}
+          euerSettings={euerSettings}
+          belegSettings={belegSettings}
+          apiToken={apiToken}
+          apiBaseUrl={apiBaseUrl}
+        />
+      )}
     </div>
   );
 };

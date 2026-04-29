@@ -25,6 +25,7 @@ export interface ProductApiValue {
   rechnungsNummer?: string; // New field
   entnahmeBelegNummer?: string;
   storageLocationId?: string;
+  barcodes?: string[];
 }
 
 // This is the structure of an entry as defined by the API for the main product database
@@ -119,6 +120,7 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ...(apiValueFields.rechnungsNummer !== undefined && { rechnungsNummer: apiValueFields.rechnungsNummer }),
     ...(apiValueFields.entnahmeBelegNummer !== undefined && { entnahmeBelegNummer: apiValueFields.entnahmeBelegNummer }),
     ...(apiValueFields.storageLocationId !== undefined && { storageLocationId: apiValueFields.storageLocationId }),
+    ...(apiValueFields.barcodes !== undefined && { barcodes: apiValueFields.barcodes }),
   };
   return apiValue;
 };
@@ -153,6 +155,7 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       rechnungsNummer: valueData.rechnungsNummer || undefined, 
       entnahmeBelegNummer: valueData.entnahmeBelegNummer || undefined,
       storageLocationId: valueData.storageLocationId || undefined,
+      barcodes: Array.isArray(valueData.barcodes) ? valueData.barcodes : undefined,
     };
 
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(product.date)) {

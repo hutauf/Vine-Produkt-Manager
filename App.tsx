@@ -34,6 +34,8 @@ const CLIENT_EDITABLE_FIELDS: Array<keyof Product> = [
   'festgeschrieben',
   'rechnungsNummer',
   'entnahmeBelegNummer',
+  'storageLocationId',
+  'barcodes',
 ];
 
 const mergeServerAndLocalProduct = (serverProduct: Product, localProduct?: Product): Product => {

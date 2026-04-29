@@ -31,6 +31,7 @@ export interface Product {
   rechnungsNummer?: string;
   entnahmeBelegNummer?: string;
   storageLocationId?: string;
+  barcodes?: string[];
 }
 
 
