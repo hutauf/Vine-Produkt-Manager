@@ -17,6 +17,11 @@ type ProcedureSection = {
   level: 1 | 2;
   body?: string[];
 };
+type ProcedureDocVersion = {
+  version: number;
+  timestamp: number;
+  docId: string;
+};
 
 const PROCEDURE_SECURITY_TEXT = 'Die vollständige Amazon-Bestellhistorie sowie die Datensätze des Vine Produkt Managers (inklusive Audit-Log/Änderungshistorie) werden unverändert gespeichert und dienen als nachvollziehbarer Nachweis der Einzelvorgänge. Änderungen an erfassten Datensätzen werden dokumentiert, sodass die Entstehung und Entwicklung der Buchungsgrundlagen jederzeit prüfbar bleibt.';
 
@@ -32,6 +37,11 @@ const createProcedureDocPdf = (variables: {
   lagerort: string;
   software: string;
   backup: string;
+  createdAtText: string;
+  lastUpdatedText: string;
+  versionLabel: string;
+  changeHistory: ProcedureDocVersion[];
+  includeGeneratedAt: boolean;
 }) => {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const margin = 25;
@@ -82,18 +92,22 @@ const createProcedureDocPdf = (variables: {
 
   doc.setFontSize(14);
   doc.setFont('times', 'normal');
-  doc.text('Dokumentenversion: 1.0', pageWidth / 2, 110, { align: 'center' });
-  doc.text(`Generiert am: ${variables.datumHeute} um ${variables.uhrzeitHeute} Uhr`, pageWidth / 2, 120, { align: 'center' });
+  doc.text(`Dokumentenversion: ${variables.versionLabel}`, pageWidth / 2, 110, { align: 'center' });
+  doc.text(`Erstellt am: ${variables.createdAtText}`, pageWidth / 2, 120, { align: 'center' });
+  doc.text(`Stand vom: ${variables.lastUpdatedText}`, pageWidth / 2, 130, { align: 'center' });
+  if (variables.includeGeneratedAt) {
+    doc.text(`PDF generiert am: ${variables.datumHeute} um ${variables.uhrzeitHeute} Uhr`, pageWidth / 2, 140, { align: 'center' });
+  }
 
   doc.setFont('times', 'bold');
   doc.setFontSize(14);
-  doc.text('Steuerpflichtiger / Geltungsbereich:', margin, 145);
+  doc.text('Steuerpflichtiger / Geltungsbereich:', margin, 160);
   doc.setFont('times', 'normal');
   doc.setFontSize(12);
-  doc.text(`Name: ${variables.name}`, margin, 157);
-  doc.text(`Anschrift: ${variables.anschrift}, ${variables.plzOrt}`, margin, 167);
-  doc.text(`USt-IdNr.: ${variables.ustId}`, margin, 177);
-  doc.text(`Steuerlicher Status: ${variables.kleinunternehmerSatz}`, margin, 187, { maxWidth: contentWidth });
+  doc.text(`Name: ${variables.name}`, margin, 172);
+  doc.text(`Anschrift: ${variables.anschrift}, ${variables.plzOrt}`, margin, 182);
+  doc.text(`USt-IdNr.: ${variables.ustId}`, margin, 192);
+  doc.text(`Steuerlicher Status: ${variables.kleinunternehmerSatz}`, margin, 202, { maxWidth: contentWidth });
 
   doc.addPage();
   y = margin;
@@ -118,11 +132,29 @@ const createProcedureDocPdf = (variables: {
     { id: '4', title: '4. Betriebsdokumentation', level: 1 },
     { id: '4.1', title: '4.1. Unveränderbarkeit und Revisionssicherheit', level: 2, body: ['Um die gesetzlich vorgeschriebene Unveränderbarkeit von Buchungsdatensätzen (§ 146 Abs. 4 AO) zu gewährleisten, greifen folgende technische und organisatorische Schutzmaßnahmen:', PROCEDURE_SECURITY_TEXT] },
     { id: '4.2', title: '4.2. Datensicherung und Aufbewahrung', level: 2, body: ['Der Steuerpflichtige ist für die Einhaltung der 10-jährigen gesetzlichen Aufbewahrungsfrist der digitalen Unterlagen selbst verantwortlich. Um Datenverlust vorzubeugen, wird folgende Backup-Strategie für die lokale Datenbank des Vine Produkt Managers angewendet:', `Die Sicherung erfolgt über: ${variables.backup}.`] },
+    { id: '5', title: '5. Änderungshistorie', level: 1 },
   ];
 
   sections.forEach(section => {
     addHeading(section.title, section.level);
     section.body?.forEach(addParagraph);
+    if (section.id === '5') {
+      const sorted = [...variables.changeHistory].sort((a, b) => a.version - b.version);
+      doc.setFont('times', 'bold');
+      doc.setFontSize(11);
+      ensurePageBreak(lineHeight);
+      doc.text('Version', margin, y);
+      doc.text('Zeitpunkt', margin + 40, y);
+      y += lineHeight;
+      doc.setFont('times', 'normal');
+      sorted.forEach(entry => {
+        ensurePageBreak(lineHeight);
+        const tsDate = new Date(entry.timestamp * 1000);
+        doc.text(`${entry.version}`, margin, y);
+        doc.text(tsDate.toLocaleString('de-DE'), margin + 40, y);
+        y += lineHeight;
+      });
+    }
   });
 
   doc.setPage(tocPageNumber);
@@ -166,6 +198,11 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
   const [backupStrategy, setBackupStrategy] = useState('Lokale Festplatte');
   const [lastUpdatedTs, setLastUpdatedTs] = useState<number | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [procedureVersions, setProcedureVersions] = useState<ProcedureDocVersion[]>([]);
+  const [createdAtTs, setCreatedAtTs] = useState<number | null>(null);
+  const [isProcedureDirty, setIsProcedureDirty] = useState(false);
+  const [hasLoadedProcedureDoc, setHasLoadedProcedureDoc] = useState(false);
+  const [savedProcedureSnapshot, setSavedProcedureSnapshot] = useState('');
 
   const availableYears = useMemo(() => {
     const years = new Set<string>();
@@ -306,26 +343,55 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
     return `Der Steuerpflichtige ermittelt den Wert der Testprodukte basierend auf ${methode}. Die Privatentnahme erfolgt standardmäßig ${entnahme}. ${streu}`;
   }, [settings]);
 
+  const buildProcedureSnapshot = () => JSON.stringify({
+    useAutoText,
+    customText,
+    storageLocation,
+    accountingTool,
+    otherAccountingTool,
+    backupStrategy,
+    userData: belegSettings.userData,
+  });
+
   useEffect(() => {
     if (!isProcedureOpen || !apiToken) return;
     (async () => {
       const resp = await apiGetProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main');
-      if (resp.status !== 'success' || !resp.data?.length) return;
-      const entry = resp.data[0];
-      setLastUpdatedTs(entry.timestamp || null);
-      try {
-        const parsed = JSON.parse(entry.value || '{}');
-        setUseAutoText(parsed.useAutoText ?? true);
-        setCustomText(parsed.customText ?? '');
-        setStorageLocation(parsed.storageLocation ?? '');
-        setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
-        setOtherAccountingTool(parsed.otherAccountingTool ?? '');
-        setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
-      } catch (e) {
-        console.error('Verfahrensdoku konnte nicht geparst werden', e);
+      if (resp.status === 'success' && resp.data?.length) {
+        const entry = resp.data[0];
+          setLastUpdatedTs(entry.timestamp || null);
+          setCreatedAtTs(entry.timestamp || null);
+        try {
+          const parsed = JSON.parse(entry.value || '{}');
+          setUseAutoText(parsed.useAutoText ?? true);
+          setCustomText(parsed.customText ?? '');
+          setStorageLocation(parsed.storageLocation ?? '');
+          setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
+          setOtherAccountingTool(parsed.otherAccountingTool ?? '');
+          setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
+          const parsedHistory = Array.isArray(parsed.versionHistory) ? parsed.versionHistory : [];
+          const normalizedHistory = parsedHistory
+            .filter((h: any) => typeof h?.version === 'number' && typeof h?.timestamp === 'number' && typeof h?.docId === 'string')
+            .map((h: any) => ({ version: h.version, timestamp: h.timestamp, docId: h.docId })) as ProcedureDocVersion[];
+          setProcedureVersions(normalizedHistory);
+          if (typeof parsed.createdAt === 'number') setCreatedAtTs(parsed.createdAt);
+        } catch (e) {
+          console.error('Verfahrensdoku konnte nicht geparst werden', e);
+        }
       }
+      setHasLoadedProcedureDoc(true);
     })();
   }, [isProcedureOpen, apiToken, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!isProcedureOpen || !hasLoadedProcedureDoc || !apiToken) return;
+    if (!savedProcedureSnapshot) {
+      setSavedProcedureSnapshot(buildProcedureSnapshot());
+      setIsProcedureDirty(false);
+      return;
+    }
+    setIsProcedureDirty(buildProcedureSnapshot() !== savedProcedureSnapshot);
+  }, [useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy, belegSettings.userData, isProcedureOpen, hasLoadedProcedureDoc, savedProcedureSnapshot, apiToken]);
 
   const handleAddressChange = (key: 'nameOrCompany' | 'addressLine1' | 'addressLine2' | 'vatId' | 'isKleinunternehmer', value: string | boolean) => {
     onBelegSettingsChange(prev => ({ ...prev, userData: { ...prev.userData, [key]: value } }));
@@ -333,14 +399,26 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
 
   const handleSaveProcedureDoc = async () => {
     if (!apiToken) return alert('Bitte API Token konfigurieren, um die Verfahrensdoku zu speichern.');
-    const payload = JSON.stringify({ useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy });
     const ts = Math.floor(Date.now() / 1000);
-    const resp = await apiUpdateProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main', payload, ts);
-    if (resp.status === 'success') {
+    const nextVersion = (procedureVersions.reduce((max, entry) => Math.max(max, entry.version), 0) || 0) + 1;
+    const versionDocId = `verfahrensdoku-v${nextVersion}`;
+    const nextHistory = [...procedureVersions, { version: nextVersion, timestamp: ts, docId: versionDocId }];
+    const effectiveCreatedAt = createdAtTs ?? ts;
+    const payload = JSON.stringify({ useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy, createdAt: effectiveCreatedAt, versionHistory: nextHistory });
+    const [versionResp, mainResp] = await Promise.all([
+      apiUpdateProcedureDoc(apiBaseUrl, apiToken, versionDocId, payload, ts),
+      apiUpdateProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main', payload, ts),
+    ]);
+    if (versionResp.status === 'success' && mainResp.status === 'success') {
       setLastUpdatedTs(ts);
+      setCreatedAtTs(effectiveCreatedAt);
+      setProcedureVersions(nextHistory);
+      const currentSnapshot = buildProcedureSnapshot();
+      setSavedProcedureSnapshot(currentSnapshot);
+      setIsProcedureDirty(false);
       alert('Verfahrensdokumentation gespeichert.');
     } else {
-      alert(`Fehler beim Speichern: ${resp.message || 'Unbekannt'}`);
+      alert(`Fehler beim Speichern: ${versionResp.message || mainResp.message || 'Unbekannt'}`);
     }
   };
 
@@ -362,6 +440,11 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       lagerort: (storageLocation || 'Nicht angegeben').trim(),
       software: (accountingTool === 'Sonstiges (Freitext)' ? otherAccountingTool : accountingTool).trim() || 'Keine zusätzliche Software',
       backup: (backupStrategy || 'Nicht angegeben').trim(),
+      createdAtText: createdAtTs ? new Date(createdAtTs * 1000).toLocaleString('de-DE') : now.toLocaleString('de-DE'),
+      lastUpdatedText: lastUpdatedTs ? new Date(lastUpdatedTs * 1000).toLocaleString('de-DE') : now.toLocaleString('de-DE'),
+      versionLabel: `v${Math.max(1, ...procedureVersions.map(v => v.version))}`,
+      changeHistory: procedureVersions,
+      includeGeneratedAt: true,
     });
 
     doc.save('GoBD_Verfahrensdokumentation.pdf');
@@ -501,9 +584,58 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
             <select value={backupStrategy} onChange={(e) => setBackupStrategy(e.target.value)} className="px-3 py-2 bg-slate-700 rounded">
               {['Lokale Festplatte', 'Externe Festplatte / NAS', 'Cloud-Speicher'].map(opt => <option key={opt}>{opt}</option>)}
             </select>
-            <div className="flex gap-3">
+            {lastUpdatedTs && <p className="text-xs text-gray-400">Zuletzt gespeichert: {new Date(lastUpdatedTs * 1000).toLocaleString('de-DE')}</p>}
+            <div className="flex gap-3 flex-wrap">
               <button onClick={handleSaveProcedureDoc} className="inline-flex items-center px-3 py-2 rounded bg-sky-600"><FaSave className="mr-2" />Speichern</button>
-              <button onClick={handleExportProcedurePdf} className="inline-flex items-center px-3 py-2 rounded bg-rose-600"><FaFilePdf className="mr-2" />Als PDF herunterladen</button>
+              <button
+                onClick={handleExportProcedurePdf}
+                disabled={!!apiToken && isProcedureDirty}
+                title={!!apiToken && isProcedureDirty ? 'Erst speichern, dann PDF erzeugen.' : 'PDF erzeugen'}
+                className={`inline-flex items-center px-3 py-2 rounded ${!!apiToken && isProcedureDirty ? 'bg-rose-900 cursor-not-allowed opacity-60' : 'bg-rose-600'}`}
+              ><FaFilePdf className="mr-2" />Als PDF herunterladen</button>
+            </div>
+            <div className="mt-4 bg-slate-700 rounded p-3">
+              <h3 className="font-semibold mb-2">Archiv</h3>
+              {procedureVersions.length === 0 ? <p className="text-sm text-gray-400">Noch keine gespeicherten Versionen vorhanden.</p> : (
+                <ul className="space-y-2 text-sm">
+                  {[...procedureVersions].sort((a,b) => b.version - a.version).map(version => (
+                    <li key={version.docId}>
+                      <button
+                        className="text-sky-300 hover:underline"
+                        onClick={async () => {
+                          if (!apiToken) return;
+                          const resp = await apiGetProcedureDoc(apiBaseUrl, apiToken, version.docId);
+                          if (resp.status !== 'success' || !resp.data?.length) return alert('Archiv-Version konnte nicht geladen werden.');
+                          const entry = resp.data[0];
+                          const parsed = JSON.parse(entry.value || '{}');
+                          const now = new Date();
+                          const doc = createProcedureDocPdf({
+                            name: belegSettings.userData.nameOrCompany || 'Nicht angegeben',
+                            anschrift: belegSettings.userData.addressLine1 || 'Nicht angegeben',
+                            plzOrt: belegSettings.userData.addressLine2 || 'Nicht angegeben',
+                            ustId: belegSettings.userData.vatId || 'Nicht angegeben',
+                            kleinunternehmerSatz: belegSettings.userData.isKleinunternehmer ? 'Das Unternehmen macht von der Kleinunternehmerregelung nach § 19 UStG Gebrauch.' : 'Das Unternehmen ist regelbesteuert.',
+                            datumHeute: now.toLocaleDateString('de-DE'),
+                            uhrzeitHeute: now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+                            wertText: ((parsed.useAutoText ? procedureAutoText : parsed.customText) || '').trim() || 'Nicht angegeben.',
+                            lagerort: (parsed.storageLocation || 'Nicht angegeben').trim(),
+                            software: ((parsed.accountingTool === 'Sonstiges (Freitext)' ? parsed.otherAccountingTool : parsed.accountingTool) || 'Keine zusätzliche Software').trim(),
+                            backup: (parsed.backupStrategy || 'Nicht angegeben').trim(),
+                            createdAtText: parsed.createdAt ? new Date(parsed.createdAt * 1000).toLocaleString('de-DE') : new Date(entry.timestamp * 1000).toLocaleString('de-DE'),
+                            lastUpdatedText: new Date(entry.timestamp * 1000).toLocaleString('de-DE'),
+                            versionLabel: `v${version.version}`,
+                            changeHistory: Array.isArray(parsed.versionHistory) ? parsed.versionHistory : procedureVersions,
+                            includeGeneratedAt: false,
+                          });
+                          doc.save(`GoBD_Verfahrensdokumentation_v${version.version}.pdf`);
+                        }}
+                      >
+                        Version v{version.version} – {new Date(version.timestamp * 1000).toLocaleString('de-DE')}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         )}
