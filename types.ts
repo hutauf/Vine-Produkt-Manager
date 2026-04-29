@@ -97,6 +97,10 @@ export interface EuerPageProps {
   settings: EuerSettings;
   onSettingsChange: (settings: EuerSettings) => void;
   additionalExpenses: AdditionalExpense[]; // Added for EÜR calculation
+  apiToken: string | null;
+  apiBaseUrl: string;
+  belegSettings: BelegSettings;
+  onBelegSettingsChange: (settings: BelegSettings | ((prevState: BelegSettings) => BelegSettings)) => void;
 }
 
 export interface ProductHistoryEntry {

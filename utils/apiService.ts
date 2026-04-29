@@ -49,6 +49,12 @@ interface ApiResponse<T> {
   skipped?: number;
 }
 
+export interface ProcedureDocEntry {
+  doc_id: string;
+  timestamp: number;
+  value: string;
+}
+
 // Generic fetch function, now accepts full URL
 async function fetchApiPost<T = any>(fullUrl: string, bodyPayload: any): Promise<ApiResponse<T>> {
   try {
@@ -243,6 +249,27 @@ export const apiGetAsinHistory = async (baseUrl: string, token: string, asin: st
   const response = await fetchApiPost<ProductHistoryEntry[]>(baseUrl, body);
   return response;
 };
+
+export const apiGetProcedureDoc = async (baseUrl: string, token: string, docId: string): Promise<ApiResponse<ProcedureDocEntry[]>> => {
+  const body = { token, request: "get_procedure_doc", payload: [docId] };
+  return fetchApiPost<ProcedureDocEntry[]>(baseUrl, body);
+};
+
+export const apiUpdateProcedureDoc = async (
+  baseUrl: string,
+  token: string,
+  docId: string,
+  value: string,
+  timestamp: number = Math.floor(Date.now() / 1000),
+): Promise<ApiResponse<null>> => {
+  const body = {
+    token,
+    request: "update_procedure_doc",
+    payload: [{ doc_id: docId, timestamp, value }],
+  };
+  return fetchApiPost<null>(baseUrl, body);
+};
+
 const parseNullableNumber = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'string') {

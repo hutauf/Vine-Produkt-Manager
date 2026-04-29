@@ -1,13 +1,23 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ProductUsage, EuerPageProps, EuerSettings } from '../../types';
-import { FaCalculator, FaCog, FaFileExcel, FaFilePdf, FaInfoCircle } from 'react-icons/fa';
+import { FaCalculator, FaCog, FaFileExcel, FaFilePdf, FaInfoCircle, FaSave, FaBook } from 'react-icons/fa';
 import { parseGermanDate } from '../../utils/dateUtils';
 import { DEFAULT_PRIVATENTNAHME_DELAY_OPTIONS } from '../../constants';
 import { isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
 import { getProductBookingEntries } from '../../utils/bookingUtils';
 import { buildEuerExportRows, exportEuerRowsToPdf, exportEuerRowsToXlsx } from '../../utils/euerExport';
+import { apiGetProcedureDoc, apiUpdateProcedureDoc } from '../../utils/apiService';
+import { jsPDF } from 'jspdf';
 
-const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChange, additionalExpenses }) => {
+const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChange, additionalExpenses, apiToken, apiBaseUrl, belegSettings, onBelegSettingsChange }) => {
+  const [isProcedureOpen, setIsProcedureOpen] = useState(false);
+  const [useAutoText, setUseAutoText] = useState(true);
+  const [customText, setCustomText] = useState('');
+  const [storageLocation, setStorageLocation] = useState('');
+  const [accountingTool, setAccountingTool] = useState('Keines (Direkt Elster)');
+  const [otherAccountingTool, setOtherAccountingTool] = useState('');
+  const [backupStrategy, setBackupStrategy] = useState('Lokale Festplatte');
+  const [lastUpdatedTs, setLastUpdatedTs] = useState<number | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
 
   const availableYears = useMemo(() => {
@@ -135,6 +145,79 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
     exportEuerRowsToPdf(rows, selectedYear);
   };
 
+  const procedureAutoText = useMemo(() => {
+    const methode = settings.useTeilwertForIncome ? 'Teilwert' : 'ETV';
+    const entnahme =
+      settings.defaultPrivatentnahmeDelay === '14d'
+        ? '2 Wochen nach Bestellung'
+        : settings.defaultPrivatentnahmeDelay === '0d'
+          ? 'sofort'
+          : `${settings.defaultPrivatentnahmeDelay} nach Bestellung`;
+    const streu = settings.streuArtikelLimitActive
+      ? `Streuartikel unter ${new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(settings.streuArtikelLimitValue)} werden steuerlich nicht erfasst.`
+      : 'Die Streuartikelregelung wird derzeit nicht angewendet.';
+    return `Der Steuerpflichtige ermittelt den Wert der Testprodukte basierend auf ${methode}. Die Privatentnahme erfolgt standardmäßig ${entnahme}. ${streu}`;
+  }, [settings]);
+
+  useEffect(() => {
+    if (!isProcedureOpen || !apiToken) return;
+    (async () => {
+      const resp = await apiGetProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main');
+      if (resp.status !== 'success' || !resp.data?.length) return;
+      const entry = resp.data[0];
+      setLastUpdatedTs(entry.timestamp || null);
+      try {
+        const parsed = JSON.parse(entry.value || '{}');
+        setUseAutoText(parsed.useAutoText ?? true);
+        setCustomText(parsed.customText ?? '');
+        setStorageLocation(parsed.storageLocation ?? '');
+        setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
+        setOtherAccountingTool(parsed.otherAccountingTool ?? '');
+        setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
+      } catch (e) {
+        console.error('Verfahrensdoku konnte nicht geparst werden', e);
+      }
+    })();
+  }, [isProcedureOpen, apiToken, apiBaseUrl]);
+
+  const handleAddressChange = (key: 'nameOrCompany' | 'addressLine1' | 'addressLine2' | 'vatId' | 'isKleinunternehmer', value: string | boolean) => {
+    onBelegSettingsChange(prev => ({ ...prev, userData: { ...prev.userData, [key]: value } }));
+  };
+
+  const handleSaveProcedureDoc = async () => {
+    if (!apiToken) return alert('Bitte API Token konfigurieren, um die Verfahrensdoku zu speichern.');
+    const payload = JSON.stringify({ useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy });
+    const ts = Math.floor(Date.now() / 1000);
+    const resp = await apiUpdateProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main', payload, ts);
+    if (resp.status === 'success') {
+      setLastUpdatedTs(ts);
+      alert('Verfahrensdokumentation gespeichert.');
+    } else {
+      alert(`Fehler beim Speichern: ${resp.message || 'Unbekannt'}`);
+    }
+  };
+
+  const handleExportProcedurePdf = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const text = [
+      'GoBD Verfahrensdokumentation',
+      `Stand: ${lastUpdatedTs ? new Date(lastUpdatedTs * 1000).toLocaleString('de-DE') : 'nicht gespeichert'}`,
+      '',
+      'Allgemeine Beschreibung (global mit Belege synchronisiert)',
+      `${belegSettings.userData.nameOrCompany}, ${belegSettings.userData.addressLine1}, ${belegSettings.userData.addressLine2}`,
+      `USt-IdNr.: ${belegSettings.userData.vatId}, Kleinunternehmer: ${belegSettings.userData.isKleinunternehmer ? 'Ja' : 'Nein'}`,
+      '',
+      'Anwenderdokumentation / Wertermittlung',
+      useAutoText ? procedureAutoText : customText,
+      '',
+      `Lagerort: ${storageLocation}`,
+      `Weitere Software: ${accountingTool}${accountingTool === 'Sonstiges (Freitext)' ? ` - ${otherAccountingTool}` : ''}`,
+      `Backup-Strategie: ${backupStrategy}`,
+    ];
+    doc.text(doc.splitTextToSize(text.join('\n'), 180), 15, 15);
+    doc.save('GoBD_Verfahrensdokumentation.pdf');
+  };
+
   return (
     <div className="space-y-8">
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
@@ -239,6 +322,42 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
             )}
           </div>
         </div>
+      </div>
+
+      <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
+        <button onClick={() => setIsProcedureOpen(v => !v)} className="w-full flex items-center justify-between text-left">
+          <h2 className="text-2xl font-semibold text-gray-100 flex items-center"><FaBook className="mr-3 text-sky-400" /> Verfahrensdokumentation (GoBD)</h2>
+          <span className="text-sky-300 text-sm">{isProcedureOpen ? 'Einklappen' : 'Öffnen'}</span>
+        </button>
+        {isProcedureOpen && (
+          <div className="mt-5 space-y-4 text-gray-200">
+            <p className="text-xs text-gray-400">Hinweis: Adressdaten sind global und werden mit dem Reiter „Belege“ synchronisiert.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input className="px-3 py-2 bg-slate-700 rounded" value={belegSettings.userData.nameOrCompany} onChange={(e) => handleAddressChange('nameOrCompany', e.target.value)} placeholder="Name/Firma" />
+              <input className="px-3 py-2 bg-slate-700 rounded" value={belegSettings.userData.vatId} onChange={(e) => handleAddressChange('vatId', e.target.value)} placeholder="USt-IdNr." />
+              <input className="px-3 py-2 bg-slate-700 rounded" value={belegSettings.userData.addressLine1} onChange={(e) => handleAddressChange('addressLine1', e.target.value)} placeholder="Anschrift Zeile 1" />
+              <input className="px-3 py-2 bg-slate-700 rounded" value={belegSettings.userData.addressLine2} onChange={(e) => handleAddressChange('addressLine2', e.target.value)} placeholder="Anschrift Zeile 2" />
+            </div>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={belegSettings.userData.isKleinunternehmer} onChange={(e) => handleAddressChange('isKleinunternehmer', e.target.checked)} /> Kleinunternehmer (§19 UStG)</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={useAutoText} onChange={(e) => setUseAutoText(e.target.checked)} /> Automatisch aus EÜR-Einstellungen generierten Text verwenden</label>
+            {useAutoText ? <p className="text-sm bg-slate-700 p-3 rounded">{procedureAutoText}</p> : <textarea value={customText} onChange={(e) => setCustomText(e.target.value)} className="w-full min-h-28 px-3 py-2 bg-slate-700 rounded" />}
+            <input className="w-full px-3 py-2 bg-slate-700 rounded" value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Lagerort während 6-monatiger Sperrfrist" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <select value={accountingTool} onChange={(e) => setAccountingTool(e.target.value)} className="px-3 py-2 bg-slate-700 rounded">
+                {['Keines (Direkt Elster)', 'invoiz', 'lexoffice', 'sevDesk', 'Sonstiges (Freitext)'].map(opt => <option key={opt}>{opt}</option>)}
+              </select>
+              {accountingTool === 'Sonstiges (Freitext)' && <input className="px-3 py-2 bg-slate-700 rounded" value={otherAccountingTool} onChange={(e) => setOtherAccountingTool(e.target.value)} placeholder="Sonstiges Tool" />}
+            </div>
+            <div className="bg-slate-700 rounded p-3 text-sm">Vollständigkeit der Einnahmen: Alle bestellten Testprodukte sind dauerhaft und unveränderlich in der Amazon Vine Bestellhistorie des Nutzers hinterlegt. Ein spurloses Löschen von Produkten zur Verschleierung von Sachbezügen ist systemseitig durch Amazon ausgeschlossen.{"\n"}Revisionssicherheit des Tools: Der eingesetzte 'Vine Produkt Manager' protokolliert jede Änderung an Produktdaten und Einstellungen serverseitig in einem append-only Audit-Log.</div>
+            <select value={backupStrategy} onChange={(e) => setBackupStrategy(e.target.value)} className="px-3 py-2 bg-slate-700 rounded">
+              {['Lokale Festplatte', 'Externe Festplatte / NAS', 'Cloud-Speicher'].map(opt => <option key={opt}>{opt}</option>)}
+            </select>
+            <div className="flex gap-3">
+              <button onClick={handleSaveProcedureDoc} className="inline-flex items-center px-3 py-2 rounded bg-sky-600"><FaSave className="mr-2" />Speichern</button>
+              <button onClick={handleExportProcedurePdf} className="inline-flex items-center px-3 py-2 rounded bg-rose-600"><FaFilePdf className="mr-2" />Als PDF herunterladen</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
