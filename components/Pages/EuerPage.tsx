@@ -9,6 +9,153 @@ import { buildEuerExportRows, exportEuerRowsToPdf, exportEuerRowsToXlsx } from '
 import { apiGetProcedureDoc, apiUpdateProcedureDoc } from '../../utils/apiService';
 import { jsPDF } from 'jspdf';
 
+
+
+type ProcedureSection = {
+  id: string;
+  title: string;
+  level: 1 | 2;
+  body?: string[];
+};
+
+const PROCEDURE_SECURITY_TEXT = 'Die vollständige Amazon-Bestellhistorie sowie die Datensätze des Vine Produkt Managers (inklusive Audit-Log/Änderungshistorie) werden unverändert gespeichert und dienen als nachvollziehbarer Nachweis der Einzelvorgänge. Änderungen an erfassten Datensätzen werden dokumentiert, sodass die Entstehung und Entwicklung der Buchungsgrundlagen jederzeit prüfbar bleibt.';
+
+const createProcedureDocPdf = (variables: {
+  name: string;
+  anschrift: string;
+  plzOrt: string;
+  ustId: string;
+  kleinunternehmerSatz: string;
+  datumHeute: string;
+  uhrzeitHeute: string;
+  wertText: string;
+  lagerort: string;
+  software: string;
+  backup: string;
+}) => {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const margin = 25;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const contentWidth = pageWidth - margin * 2;
+  const lineHeight = 6.4;
+
+  let y = margin;
+  const tocEntries: { title: string; level: 1 | 2; page: number }[] = [];
+
+  const ensurePageBreak = (neededHeight = lineHeight) => {
+    if (y + neededHeight > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  const addParagraph = (text: string) => {
+    const cleaned = (text || '').trim();
+    if (!cleaned) return;
+    doc.setFont('times', 'normal');
+    doc.setFontSize(11);
+    const lines = doc.splitTextToSize(cleaned, contentWidth);
+    lines.forEach((line: string) => {
+      ensurePageBreak();
+      doc.text(line, margin, y);
+      y += lineHeight;
+    });
+    y += 1.5;
+  };
+
+  const addHeading = (title: string, level: 1 | 2) => {
+    const fontSize = level === 1 ? 16 : 13;
+    const topSpacing = level === 1 ? 5 : 3;
+    ensurePageBreak(topSpacing + lineHeight);
+    y += topSpacing;
+    doc.setFont('times', 'bold');
+    doc.setFontSize(fontSize);
+    doc.text(title, margin, y);
+    y += lineHeight + (level === 1 ? 1 : 0);
+    tocEntries.push({ title, level, page: doc.getNumberOfPages() });
+  };
+
+  doc.setFont('times', 'bold');
+  doc.setFontSize(24);
+  doc.text('Verfahrensdokumentation zur Erfassung und Versteuerung von Amazon Vine Testprodukten', pageWidth / 2, 70, { align: 'center', maxWidth: 160 });
+
+  doc.setFontSize(14);
+  doc.setFont('times', 'normal');
+  doc.text('Dokumentenversion: 1.0', pageWidth / 2, 110, { align: 'center' });
+  doc.text(`Generiert am: ${variables.datumHeute} um ${variables.uhrzeitHeute} Uhr`, pageWidth / 2, 120, { align: 'center' });
+
+  doc.setFont('times', 'bold');
+  doc.setFontSize(14);
+  doc.text('Steuerpflichtiger / Geltungsbereich:', margin, 145);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(12);
+  doc.text(`Name: ${variables.name}`, margin, 157);
+  doc.text(`Anschrift: ${variables.anschrift}, ${variables.plzOrt}`, margin, 167);
+  doc.text(`USt-IdNr.: ${variables.ustId}`, margin, 177);
+  doc.text(`Steuerlicher Status: ${variables.kleinunternehmerSatz}`, margin, 187, { maxWidth: contentWidth });
+
+  doc.addPage();
+  y = margin;
+
+  const tocPageNumber = doc.getNumberOfPages();
+  doc.setFont('times', 'bold');
+  doc.setFontSize(20);
+  doc.text('Inhaltsverzeichnis', margin, y);
+
+  doc.addPage();
+  y = margin;
+
+  const sections: ProcedureSection[] = [
+    { id: '1', title: '1. Allgemeine Beschreibung', level: 1 },
+    { id: '1.1', title: '1.1. Zweck der Dokumentation', level: 2, body: ['Diese Verfahrensdokumentation beschreibt die kaufmännischen, steuerlichen und technischen Prozesse des oben genannten Steuerpflichtigen im Rahmen seiner Tätigkeit als Produkttester für das "Amazon Vine"-Programm. Zweck ist die GoBD-konforme Darlegung, wie die durch Amazon überlassenen Sachbezüge (Testprodukte) erfasst, bewertet, aufbewahrt und in die Finanzbuchhaltung überführt werden.'] },
+    { id: '1.2', title: '1.2. Geschäftsmodell und Prozessübersicht', level: 2, body: ['Der Steuerpflichtige fordert über das Amazon Vine Portal Testprodukte an. Die Produkte werden mit einem von Amazon geschätzten Steuerwert (Estimated Tax Value / ETV) ausgewiesen. Nach Erhalt sind die Produkte innerhalb einer Frist zu bewerten und unterliegen in der Regel einer sechsmonatigen Sperrfrist, in der sie weder veräußert noch an Dritte weitergegeben werden dürfen. Die Erfassung dieser Sachzuwendungen stellt die Grundlage für die steuerliche Gewinnermittlung (EÜR) dar.'] },
+    { id: '2', title: '2. Anwenderdokumentation (Fachliches Verfahren)', level: 1 },
+    { id: '2.1', title: '2.1. Erfassung und Lagerung', level: 2, body: ['Die Erfassung der bestellten und gelieferten Produkte erfolgt digital über das Tool "Vine Produkt Manager". Während der von Amazon vorgeschriebenen sechsmonatigen Sperrfrist, in der die Produkte im Eigentum von Amazon verbleiben bzw. nicht frei verwertbar sind, erfolgt die physische Aufbewahrung an folgendem Ort:', `${variables.lagerort}.`] },
+    { id: '2.2', title: '2.2. Wertermittlung und Privatentnahme', level: 2, body: ['Die steuerliche Bemessungsgrundlage der erhaltenen Produkte wird nach fest definierten Regeln ermittelt. Hierfür gilt folgender, vom Steuerpflichtigen festgelegter Prozess:', variables.wertText] },
+    { id: '3', title: '3. Technische Systemdokumentation', level: 1 },
+    { id: '3.1', title: '3.1. Eingesetzte Systeme', level: 2, body: [`Die primäre Erfassung, Verwaltung und Historisierung der Testprodukte erfolgt durch die Software "Vine Produkt Manager". Sofern eine weitere Software für die finale Rechnungserstellung, Buchhaltung oder Übermittlung an das Finanzamt genutzt wird, handelt es sich um: ${variables.software}. Ist hier keine Software aufgeführt, erfolgt die Übertragung der ermittelten Summen direkt in das ELSTER-Portal der Finanzverwaltung.`] },
+    { id: '4', title: '4. Betriebsdokumentation', level: 1 },
+    { id: '4.1', title: '4.1. Unveränderbarkeit und Revisionssicherheit', level: 2, body: ['Um die gesetzlich vorgeschriebene Unveränderbarkeit von Buchungsdatensätzen (§ 146 Abs. 4 AO) zu gewährleisten, greifen folgende technische und organisatorische Schutzmaßnahmen:', PROCEDURE_SECURITY_TEXT] },
+    { id: '4.2', title: '4.2. Datensicherung und Aufbewahrung', level: 2, body: ['Der Steuerpflichtige ist für die Einhaltung der 10-jährigen gesetzlichen Aufbewahrungsfrist der digitalen Unterlagen selbst verantwortlich. Um Datenverlust vorzubeugen, wird folgende Backup-Strategie für die lokale Datenbank des Vine Produkt Managers angewendet:', `Die Sicherung erfolgt über: ${variables.backup}.`] },
+  ];
+
+  sections.forEach(section => {
+    addHeading(section.title, section.level);
+    section.body?.forEach(addParagraph);
+  });
+
+  doc.setPage(tocPageNumber);
+  y = margin + 12;
+  doc.setFont('times', 'normal');
+  doc.setFontSize(11);
+  tocEntries.forEach(entry => {
+    const indent = entry.level === 1 ? 0 : 8;
+    const titleX = margin + indent;
+    const dotsStartX = margin + 130;
+    ensurePageBreak();
+    doc.text(entry.title, titleX, y);
+    const pageText = `${entry.page}`;
+    const pageWidthText = doc.getTextWidth(pageText);
+    const dotsWidth = dotsStartX - titleX - doc.getTextWidth(entry.title) - 4;
+    if (dotsWidth > 6) {
+      const dotCount = Math.floor(dotsWidth / doc.getTextWidth('.'));
+      doc.text('.'.repeat(Math.max(4, dotCount)), titleX + doc.getTextWidth(entry.title) + 2, y);
+    }
+    doc.text(pageText, pageWidth - margin - pageWidthText, y);
+    y += lineHeight;
+  });
+
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont('times', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Seite ${i} von ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+  }
+
+  return doc;
+};
 const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChange, additionalExpenses, apiToken, apiBaseUrl, belegSettings, onBelegSettingsChange }) => {
   const [isProcedureOpen, setIsProcedureOpen] = useState(false);
   const [useAutoText, setUseAutoText] = useState(true);
@@ -198,23 +345,25 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
   };
 
   const handleExportProcedurePdf = () => {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const text = [
-      'GoBD Verfahrensdokumentation',
-      `Stand: ${lastUpdatedTs ? new Date(lastUpdatedTs * 1000).toLocaleString('de-DE') : 'nicht gespeichert'}`,
-      '',
-      'Allgemeine Beschreibung (global mit Belege synchronisiert)',
-      `${belegSettings.userData.nameOrCompany}, ${belegSettings.userData.addressLine1}, ${belegSettings.userData.addressLine2}`,
-      `USt-IdNr.: ${belegSettings.userData.vatId}, Kleinunternehmer: ${belegSettings.userData.isKleinunternehmer ? 'Ja' : 'Nein'}`,
-      '',
-      'Anwenderdokumentation / Wertermittlung',
-      useAutoText ? procedureAutoText : customText,
-      '',
-      `Lagerort: ${storageLocation}`,
-      `Weitere Software: ${accountingTool}${accountingTool === 'Sonstiges (Freitext)' ? ` - ${otherAccountingTool}` : ''}`,
-      `Backup-Strategie: ${backupStrategy}`,
-    ];
-    doc.text(doc.splitTextToSize(text.join('\n'), 180), 15, 15);
+    const now = new Date();
+    const datumHeute = now.toLocaleDateString('de-DE');
+    const uhrzeitHeute = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    const doc = createProcedureDocPdf({
+      name: belegSettings.userData.nameOrCompany || 'Nicht angegeben',
+      anschrift: belegSettings.userData.addressLine1 || 'Nicht angegeben',
+      plzOrt: belegSettings.userData.addressLine2 || 'Nicht angegeben',
+      ustId: belegSettings.userData.vatId || 'Nicht angegeben',
+      kleinunternehmerSatz: belegSettings.userData.isKleinunternehmer
+        ? 'Das Unternehmen macht von der Kleinunternehmerregelung nach § 19 UStG Gebrauch.'
+        : 'Das Unternehmen ist regelbesteuert.',
+      datumHeute,
+      uhrzeitHeute,
+      wertText: (useAutoText ? procedureAutoText : customText).trim() || 'Nicht angegeben.',
+      lagerort: (storageLocation || 'Nicht angegeben').trim(),
+      software: (accountingTool === 'Sonstiges (Freitext)' ? otherAccountingTool : accountingTool).trim() || 'Keine zusätzliche Software',
+      backup: (backupStrategy || 'Nicht angegeben').trim(),
+    });
+
     doc.save('GoBD_Verfahrensdokumentation.pdf');
   };
 
