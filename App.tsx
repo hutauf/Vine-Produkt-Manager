@@ -899,6 +899,8 @@ const App: React.FC = () => {
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
+            apiToken={apiToken}
+            apiBaseUrl={apiBaseUrl}
             onOpenBelegeTab={handleOpenBelegeTab}
           />
         )}
@@ -916,6 +918,8 @@ const App: React.FC = () => {
             onExecuteBulkBelegFestschreiben={executeBulkBelegFestschreiben} 
             focusOptions={belegeFocus}
             onFocusConsumed={() => setBelegeFocus(null)}
+            apiToken={apiToken}
+            apiBaseUrl={apiBaseUrl}
           />
         )}
         {activeTab === TAB_OPTIONS.SETTINGS && (

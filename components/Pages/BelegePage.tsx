@@ -29,6 +29,8 @@ interface BelegePageProps {
   ) => Promise<{success: boolean; message: string;}>;
   focusOptions?: { invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string } | null;
   onFocusConsumed?: () => void;
+  apiToken: string | null;
+  apiBaseUrl: string;
 }
 
 const BelegePage: React.FC<BelegePageProps> = ({ 
@@ -43,7 +45,9 @@ const BelegePage: React.FC<BelegePageProps> = ({
     setAppFeedbackMessage,
     onExecuteBulkBelegFestschreiben,
     focusOptions,
-    onFocusConsumed
+    onFocusConsumed,
+    apiToken,
+    apiBaseUrl
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'todo' | 'archiviert'>('todo');
   const [selectedProductForBeleg, setSelectedProductForBeleg] = useState<Product | null>(null);
@@ -763,6 +767,8 @@ const BelegePage: React.FC<BelegePageProps> = ({
             }}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
+            apiToken={apiToken}
+            apiBaseUrl={apiBaseUrl}
             onOpenBelegeTab={(options) => {
               setActiveSubTab('archiviert');
               const target = products.find(p =>

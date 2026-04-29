@@ -74,6 +74,8 @@ export interface SalesPageProps {
   euerSettings: EuerSettings;
   belegSettings: BelegSettings;
   onOpenBelegeTab?: (options: { invoiceNumber?: string; entnahmeBelegNummer?: string; asin?: string }) => void;
+  apiToken: string | null;
+  apiBaseUrl: string;
 }
 
 export interface AdditionalExpense {

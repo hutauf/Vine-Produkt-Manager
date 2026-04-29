@@ -459,6 +459,8 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
         }}
         euerSettings={euerSettings}
         belegSettings={belegSettings}
+        apiToken={apiToken}
+        apiBaseUrl={apiBaseUrl}
         onOpenBelegeTab={onOpenBelegeTab}
       />
     )}

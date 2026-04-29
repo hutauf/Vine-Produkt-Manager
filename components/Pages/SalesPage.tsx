@@ -11,7 +11,7 @@ import { parseDMYtoDate, parseGermanDate } from '../../utils/dateUtils';
 type SortKey = 'ASIN' | 'name' | 'orderDate' | 'saleDate' | 'salePrice' | 'etv' | 'calculatedTeilwert';
 type SortOrder = 'asc' | 'desc';
 
-const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSettings, belegSettings, onOpenBelegeTab }) => {
+const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSettings, belegSettings, onOpenBelegeTab, apiToken, apiBaseUrl }) => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('saleDate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -203,6 +203,8 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
           onSave={handleSaveEditedProduct}
           euerSettings={euerSettings}
           belegSettings={belegSettings}
+          apiToken={apiToken}
+          apiBaseUrl={apiBaseUrl}
           onOpenBelegeTab={onOpenBelegeTab}
         />
       )}
