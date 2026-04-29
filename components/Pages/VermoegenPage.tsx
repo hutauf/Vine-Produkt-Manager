@@ -8,6 +8,11 @@ import CreateShopModal from '../Shop/CreateShopModal';
 import PublishedUrlModal from '../Shop/PublishedUrlModal';
 import { generateShopHtml } from '../../utils/shopGenerator';
 import EditProductModal from '../Products/EditProductModal';
+import ScannerPanel from '../Scanner/ScannerPanel';
+import StorageLocationManager from '../Storage/StorageLocationManager';
+import LocationInventoryAuditView from '../Storage/LocationInventoryAuditView';
+import Modal from '../Common/Modal';
+import { StorageLocationEntry } from '../../utils/storageLocationService';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
@@ -25,6 +30,8 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [locations, setLocations] = useState<StorageLocationEntry[]>([]);
+  const [activeAuditLocation, setActiveAuditLocation] = useState<string | null>(null);
 
   const hasTeilwert = (product: Product): boolean => product.myTeilwert != null || product.teilwert != null;
   const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0;
@@ -264,6 +271,18 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   return (
     <div className="space-y-8">
+      <ScannerPanel title="Scanner (Vermögen/Lager)" helpText="Scannt Produktcodes und startet Routing/Verknüpfung je nach Treffer." onDetected={(code) => console.log('Vermögen scan detected:', code)} />
+      <StorageLocationManager
+        locations={locations}
+        products={products}
+        onSave={async (entries) => setLocations((prev) => [...prev, ...entries.map((entry) => ({ location_id: entry.location_id, timestamp: entry.timestamp ?? Math.floor(Date.now() / 1000), value: entry.value }))])}
+        onDelete={async (locationId) => setLocations((prev) => prev.filter((loc) => loc.location_id !== locationId))}
+        onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
+        onPrintLabel={(locationId) => console.log('Print location label:', locationId)}
+      />
+      <Modal isOpen={!!activeAuditLocation} onClose={() => setActiveAuditLocation(null)} title={`Inventur · ${activeAuditLocation ?? ''}`} size="lg">
+        {activeAuditLocation && <LocationInventoryAuditView locationId={activeAuditLocation} products={products} />}
+      </Modal>
       {renderProductTable(umlaufvermoegen, "Umlaufvermögen", <FaArchive className="mr-3 text-sky-400"/>, true, sumETVUmlauf, sumTeilwertUmlauf, "Umlaufvermögen")}
       {renderProductTable(anlagenverzeichnis, "Anlagenverzeichnis", <FaBuilding className="mr-3 text-sky-400"/>, true, sumETVAnlage, sumTeilwertAnlage, "Anlagenverzeichnis")}
       

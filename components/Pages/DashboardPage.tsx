@@ -6,6 +6,7 @@ import FileUpload from '../Products/FileUpload';
 import ProductPlots from '../Dashboard/ProductPlots';
 import { FaFilter, FaTimes, FaSearch } from 'react-icons/fa';
 import { parseDMYtoDate } from '../../utils/dateUtils';
+import ScannerPanel from '../Scanner/ScannerPanel';
 
 interface DashboardPageProps {
   products: Product[];
@@ -209,6 +210,15 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
 
       <div>
+        <div className="mb-4">
+          <ScannerPanel
+            title="Scanner (Dashboard)"
+            helpText="Scannt EAN/FNSKU. Bei Treffer: Produktdetail öffnen. Bei unbekanntem Code: ASIN-Verknüpfungsdialog öffnen."
+            onDetected={(code) => {
+              console.log('Dashboard scan detected:', code);
+            }}
+          />
+        </div>
         <h2 className="text-2xl font-semibold text-gray-100 mb-4">Produktliste ({filteredProducts.length})</h2>
         {filteredProducts.length > 0 ? (
             <ProductTable 
