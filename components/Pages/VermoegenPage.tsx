@@ -35,7 +35,11 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   useEffect(() => {
     const loadLocations = async () => {
-      if (!apiToken) return;
+      if (!apiToken) {
+        setLocations([]);
+        setActiveAuditLocation(null);
+        return;
+      }
       const response = await listStorageLocations(apiBaseUrl, apiToken);
       if (response.status === 'success' && response.data) {
         setLocations(response.data);
