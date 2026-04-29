@@ -8,7 +8,7 @@ interface LocationInventoryAuditViewProps {
 }
 
 const LocationInventoryAuditView: React.FC<LocationInventoryAuditViewProps> = ({ locationId, products }) => {
-  const expected = useMemo(() => products.filter((p: any) => p.storageLocationId === locationId), [products, locationId]);
+  const expected = useMemo(() => products.filter((p) => p.storageLocationId === locationId), [products, locationId]);
   const [scanned, setScanned] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +17,7 @@ const LocationInventoryAuditView: React.FC<LocationInventoryAuditViewProps> = ({
   }, [expected, scanned]);
 
   const onDetected = (code: string) => {
-    const match = expected.find((p) => p.ASIN === code || (p as any).barcode === code);
+    const match = expected.find((p) => p.ASIN === code);
     if (!match) {
       setError(`Produkt ${code} gehört laut System nicht zu Lagerort ${locationId}.`);
       return;

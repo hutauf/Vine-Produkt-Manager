@@ -26,18 +26,26 @@ interface RawStorageLocationEntry {
 }
 
 async function postDataOperation<T>(baseUrl: string, token: string, request: string, payload?: unknown): Promise<DataOperationResponse<T>> {
-  const response = await fetch(baseUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
-    body: JSON.stringify({ token, request, ...(payload !== undefined ? { payload } : {}) }),
-    mode: 'cors',
-  });
+  try {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
+      body: JSON.stringify({ token, request, ...(payload !== undefined ? { payload } : {}) }),
+      mode: 'cors',
+    });
 
-  if (!response.ok) {
-    return { status: 'error', message: `HTTP ${response.status}: ${response.statusText}` };
+    if (!response.ok) {
+      return { status: 'error', message: `HTTP ${response.status}: ${response.statusText}` };
+    }
+
+    try {
+      return (await response.json()) as DataOperationResponse<T>;
+    } catch (error) {
+      return { status: 'error', message: `Ungültige JSON-Antwort vom Server: ${error instanceof Error ? error.message : 'Unknown parse error'}` };
+    }
+  } catch (error) {
+    return { status: 'error', message: `Netzwerkfehler bei /data_operations: ${error instanceof Error ? error.message : 'Unknown network error'}` };
   }
-
-  return response.json() as Promise<DataOperationResponse<T>>;
 }
 
 function parseLocation(entry: RawStorageLocationEntry): StorageLocationEntry {

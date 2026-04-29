@@ -17,7 +17,7 @@ const StorageLocationManager: React.FC<StorageLocationManagerProps> = ({ locatio
 
   const assignedCountMap = useMemo(() => {
     const counts = new Map<string, number>();
-    products.forEach((product: any) => {
+    products.forEach((product) => {
       const locationId = product.storageLocationId;
       if (!locationId) return;
       counts.set(locationId, (counts.get(locationId) ?? 0) + 1);

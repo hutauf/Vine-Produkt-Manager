@@ -30,6 +30,7 @@ export interface Product {
   festgeschrieben?: 1;
   rechnungsNummer?: string;
   entnahmeBelegNummer?: string;
+  storageLocationId?: string;
 }
 
 
