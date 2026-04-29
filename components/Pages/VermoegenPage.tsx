@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '../../types';
 import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
@@ -12,12 +12,12 @@ import ScannerPanel from '../Scanner/ScannerPanel';
 import StorageLocationManager from '../Storage/StorageLocationManager';
 import LocationInventoryAuditView from '../Storage/LocationInventoryAuditView';
 import Modal from '../Common/Modal';
-import { StorageLocationEntry } from '../../utils/storageLocationService';
+import { deleteStorageLocation, listStorageLocations, StorageLocationEntry, UpdateStorageLocationInput, updateStorageLocations } from '../../utils/storageLocationService';
 
 type ProductSortKey = 'ASIN' | 'name' | 'date' | 'etv' | 'calculatedTeilwert';
 type ExpenseSortKey = 'date' | 'name' | 'amount';
 
-const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings, onOpenBelegeTab }) => {
+const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpenses, onAddExpense, onDeleteExpense, onUpdateProduct, euerSettings, belegSettings, apiToken, apiBaseUrl, onOpenBelegeTab }) => {
   const [productSortKey, setProductSortKey] = useState<ProductSortKey>('date');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('desc');
   
@@ -32,6 +32,38 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [locations, setLocations] = useState<StorageLocationEntry[]>([]);
   const [activeAuditLocation, setActiveAuditLocation] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      if (!apiToken) return;
+      const response = await listStorageLocations(apiBaseUrl, apiToken);
+      if (response.status === 'success' && response.data) {
+        setLocations(response.data);
+      }
+    };
+    loadLocations();
+  }, [apiBaseUrl, apiToken]);
+
+  const handleSaveLocations = async (entries: UpdateStorageLocationInput[]) => {
+    if (!apiToken) return;
+    const response = await updateStorageLocations(apiBaseUrl, apiToken, entries);
+    if (response.status === 'success') {
+      const reloaded = await listStorageLocations(apiBaseUrl, apiToken);
+      if (reloaded.status === 'success' && reloaded.data) setLocations(reloaded.data);
+    } else {
+      alert(response.message || 'Fehler beim Speichern der Lagerorte.');
+    }
+  };
+
+  const handleDeleteLocation = async (locationId: string) => {
+    if (!apiToken) return;
+    const response = await deleteStorageLocation(apiBaseUrl, apiToken, locationId);
+    if (response.status === 'success') {
+      setLocations((prev) => prev.filter((loc) => loc.location_id !== locationId));
+    } else {
+      alert(response.message || 'Fehler beim Löschen des Lagerortes.');
+    }
+  };
 
   const hasTeilwert = (product: Product): boolean => product.myTeilwert != null || product.teilwert != null;
   const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0;
@@ -275,8 +307,8 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
       <StorageLocationManager
         locations={locations}
         products={products}
-        onSave={async (entries) => setLocations((prev) => [...prev, ...entries.map((entry) => ({ location_id: entry.location_id, timestamp: entry.timestamp ?? Math.floor(Date.now() / 1000), value: entry.value }))])}
-        onDelete={async (locationId) => setLocations((prev) => prev.filter((loc) => loc.location_id !== locationId))}
+        onSave={handleSaveLocations}
+        onDelete={handleDeleteLocation}
         onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
         onPrintLabel={(locationId) => console.log('Print location label:', locationId)}
       />

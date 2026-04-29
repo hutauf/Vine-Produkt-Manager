@@ -103,3 +103,13 @@ export async function mergeStorageLocationValue(baseUrl: string, token: string, 
     },
   ]);
 }
+
+export async function deleteStorageLocation(baseUrl: string, token: string, locationId: string): Promise<DataOperationResponse<null>> {
+  return updateStorageLocations(baseUrl, token, [
+    {
+      location_id: locationId,
+      timestamp: Math.floor(Date.now() / 1000),
+      value: { deleted: true },
+    },
+  ]);
+}
