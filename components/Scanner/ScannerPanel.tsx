@@ -23,8 +23,11 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
   };
 
   useEffect(() => {
+    let isMounted = true;
+
     if (isScanning && !scannerRef.current) {
       Html5Qrcode.getCameras().then((devices) => {
+        if (!isMounted) return;
         if (devices && devices.length) {
           setCameras(devices);
           const defaultCamId = selectedCamera || devices[0].id;
@@ -37,59 +40,59 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
             defaultCamId, 
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-              onDetected(decodedText);
+              if (isMounted) onDetected(decodedText);
             },
             (error) => {
               // Ignore frequent error callbacks for not finding a barcode
             }
           ).catch((err) => {
             console.error('Failed to start scanner', err);
-            setIsScanning(false);
+            if (isMounted) setIsScanning(false);
           });
         }
       }).catch((err) => {
         console.error('Failed to get cameras', err);
-        setIsScanning(false);
+        if (isMounted) setIsScanning(false);
       });
     } else if (!isScanning && scannerRef.current) {
-      scannerRef.current.stop().then(() => {
-        scannerRef.current?.clear();
-        scannerRef.current = null;
-      }).catch(e => console.error('Failed to stop scanner', e));
+      // It's crucial that the DOM element still exists when stop() and clear() are called.
+      // We also handle the case where stop() might fail if it wasn't fully started.
+      const html5QrCode = scannerRef.current;
+      scannerRef.current = null; // Detach immediately to prevent double-calls
+      
+      try {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+        }).catch(e => {
+          console.warn('Failed to stop scanner smoothly, trying clear anyway', e);
+          try { html5QrCode.clear(); } catch (err) {}
+        });
+      } catch (err) {
+        console.warn('Sync error stopping scanner', err);
+      }
     }
 
     return () => {
-      if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current.stop().then(() => {
-          scannerRef.current?.clear();
-          scannerRef.current = null;
-        }).catch(e => console.error('Failed to stop scanner on unmount', e));
+      isMounted = false;
+    };
+  }, [isScanning, scannerContainerId, onDetected, selectedCamera]);
+
+  // Handle unmount cleanup separately so it only runs when the component actually unmounts
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        const html5QrCode = scannerRef.current;
+        scannerRef.current = null;
+        try {
+          html5QrCode.stop().then(() => {
+             try { html5QrCode.clear(); } catch (err) {}
+          }).catch(() => {
+             try { html5QrCode.clear(); } catch (err) {}
+          });
+        } catch (err) {}
       }
     };
-  }, [isScanning, scannerContainerId, onDetected]); // deliberate dependency choices to prevent restarts
-
-  // Effect to handle camera change while scanning
-  useEffect(() => {
-    if (isScanning && scannerRef.current && selectedCamera) {
-      const restartScanner = async () => {
-        if (scannerRef.current?.isScanning) {
-          await scannerRef.current.stop();
-          scannerRef.current.clear();
-        }
-        try {
-          await scannerRef.current?.start(
-            selectedCamera,
-            { fps: 10, qrbox: { width: 250, height: 250 } },
-            (decodedText) => { onDetected(decodedText); },
-            () => {}
-          );
-        } catch (e) {
-          console.error("Failed to restart with new camera", e);
-        }
-      };
-      restartScanner();
-    }
-  }, [selectedCamera]);
+  }, []);
 
   return (
     <div className="p-4 rounded-lg border border-slate-700 bg-slate-800 space-y-3">
@@ -120,7 +123,18 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
         {isScanning && cameras.length > 1 && (
           <select
             value={selectedCamera}
-            onChange={(e) => setSelectedCamera(e.target.value)}
+            onChange={(e) => {
+              // Stop current scan before changing camera state
+              if (scannerRef.current) {
+                setIsScanning(false);
+                setTimeout(() => {
+                  setSelectedCamera(e.target.value);
+                  setIsScanning(true);
+                }, 500); // Give it half a second to completely tear down
+              } else {
+                setSelectedCamera(e.target.value);
+              }
+            }}
             className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 text-sm"
           >
             {cameras.map(cam => (
@@ -130,11 +144,9 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
         )}
       </div>
 
-      {isScanning && (
-        <div className="mt-4 bg-slate-200 rounded-lg overflow-hidden">
-          <div id={scannerContainerId}></div>
-        </div>
-      )}
+      <div className={`mt-4 bg-slate-200 rounded-lg overflow-hidden ${isScanning ? 'block' : 'hidden'}`}>
+        <div id={scannerContainerId}></div>
+      </div>
     </div>
   );
 };
