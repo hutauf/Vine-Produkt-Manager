@@ -14,11 +14,35 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const lastScannedRef = useRef<{code: string, time: number} | null>(null);
   const scannerContainerId = useMemo(() => `qr-reader-${title.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).substring(7)}`, [title]);
+
+  const playSound = () => {
+    try {
+      const audio = new Audio('/sounds/bingsound.mp3');
+      audio.play().catch(e => console.warn('Could not play sound', e));
+    } catch (e) {}
+  };
+
+  const handleDetect = (code: string) => {
+    const now = Date.now();
+    if (lastScannedRef.current) {
+      const { code: lastCode, time: lastTime } = lastScannedRef.current;
+      // Debounce: ignore same code within 2 seconds
+      if (code === lastCode && (now - lastTime) < 2000) {
+        return;
+      }
+    }
+    lastScannedRef.current = { code, time: now };
+    playSound();
+    setIsScanning(false); // Stop scanner automatically after a successful read
+    onDetected(code);
+  };
 
   const triggerScan = async () => {
     if (!manualCode.trim()) return;
-    await onDetected(manualCode.trim());
+    setIsScanning(false); // Stop camera if manual entry is used while scanning
+    handleDetect(manualCode.trim());
     setManualCode('');
   };
 
@@ -40,7 +64,7 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
             defaultCamId, 
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-              if (isMounted) onDetected(decodedText);
+              if (isMounted) handleDetect(decodedText);
             },
             (error) => {
               // Ignore frequent error callbacks for not finding a barcode

@@ -400,27 +400,32 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         </div>
         
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-300 mb-1">Verknüpfte Barcodes</label>
-          {formData.barcodes.length > 0 ? (
-            <ul className="list-disc pl-5 text-gray-300 text-sm mb-2">
-              {formData.barcodes.map(code => (
-                <li key={code} className="flex justify-between items-center py-1">
-                  {code} 
-                  <button type="button" onClick={() => handleChange('barcodes', formData.barcodes.filter(c => c !== code))} className="text-red-400 hover:text-red-300 ml-2">Entfernen</button>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Zusätzliche Barcodes / QR-Codes</label>
+          {formData.barcodes.length > 0 && (
+            <ul className="mb-3 space-y-2">
+              {formData.barcodes.map((bc, idx) => (
+                <li key={idx} className="flex justify-between items-center bg-slate-700 px-3 py-2 rounded-md border border-slate-600">
+                  <span className="text-gray-100 font-mono text-sm">{bc}</span>
+                  <button type="button" onClick={() => handleChange('barcodes', formData.barcodes.filter(c => c !== bc))} className="text-rose-400 hover:text-rose-300 text-sm">Entfernen</button>
                 </li>
               ))}
             </ul>
-          ) : <p className="text-sm text-gray-500 mb-2">Keine Barcodes verknüpft.</p>}
+          )}
           <ScannerPanel 
             title="Neuen Code scannen" 
             helpText="Scannen Sie einen Barcode oder QR-Code, um ihn diesem Produkt zuzuordnen."
             onDetected={(code) => {
-              if (!formData.barcodes.includes(code) && code !== product.ASIN) {
+              if (code === product.ASIN) {
+                alert(`Der gescannte Code ist die ASIN (${code}). Dies ist dem Produkt ohnehin fest zugeordnet und muss nicht als extra Barcode gespeichert werden.`);
+              } else if (formData.barcodes.includes(code)) {
+                alert(`Der Code ${code} ist bereits in der Liste vorhanden.`);
+              } else {
                 handleChange('barcodes', [...formData.barcodes, code]);
               }
             }}
           />
         </div>
+
         <div className="mt-4">
           <Button type="button" variant="secondary" onClick={async () => {
              await downloadLabelPdf({ type: 'product', id: product.ASIN, meta: true, name: product.name }, `Produkt_${product.ASIN}.pdf`);
