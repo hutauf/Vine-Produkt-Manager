@@ -26,7 +26,8 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0; // <--- MODIFIED HERE
+  const hasTeilwert = (product: Product): boolean => product.myTeilwert != null || product.teilwert != null;
+  const getCalculatedTeilwert = (product: Product): number => product.myTeilwert ?? product.teilwert ?? 0;
 
   const umlaufvermoegen = useMemo(() => {
     return products
@@ -229,7 +230,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                   <td className="px-4 py-3 text-sm text-gray-200 max-w-xs truncate" title={p.name}>{p.name}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatDate(p.orderDateObj)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(p.etv)}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(getCalculatedTeilwert(p))}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{hasTeilwert(p) ? formatCurrency(getCalculatedTeilwert(p)) : 'N/A'}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm">
                     <Button size="sm" variant="ghost" onClick={() => setEditingProduct(p)} title="Produkt bearbeiten">
                       <FaEdit />
