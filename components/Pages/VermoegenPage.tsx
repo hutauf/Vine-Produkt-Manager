@@ -330,17 +330,6 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   return (
     <div className="space-y-8">
       <ScannerPanel title="Scanner (Vermögen/Lager)" helpText="Scannt Produktcodes (öffnet Detail) oder Lagerort-Codes (öffnet Inventur)." onDetected={handleScan} />
-      <StorageLocationManager
-        locations={locations}
-        products={products}
-        onSave={handleSaveLocations}
-        onDelete={handleDeleteLocation}
-        onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
-        onPrintLabel={handlePrintLabel}
-      />
-      <Modal isOpen={!!activeAuditLocation} onClose={() => setActiveAuditLocation(null)} title={`Inventur · ${activeAuditLocation ?? ''}`} size="lg">
-        {activeAuditLocation && <LocationInventoryAuditView locationId={activeAuditLocation} products={products} />}
-      </Modal>
       {renderProductTable(umlaufvermoegen, "Umlaufvermögen", <FaArchive className="mr-3 text-sky-400"/>, true, sumETVUmlauf, sumTeilwertUmlauf, "Umlaufvermögen")}
       {renderProductTable(anlagenverzeichnis, "Anlagenverzeichnis", <FaBuilding className="mr-3 text-sky-400"/>, true, sumETVAnlage, sumTeilwertAnlage, "Anlagenverzeichnis")}
       
@@ -412,6 +401,19 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
             </Button>
         </div>
       </div>
+      
+      <StorageLocationManager
+        locations={locations}
+        products={products}
+        onSave={handleSaveLocations}
+        onDelete={handleDeleteLocation}
+        onOpenAudit={(locationId) => setActiveAuditLocation(locationId)}
+        onPrintLabel={handlePrintLabel}
+      />
+      <Modal isOpen={!!activeAuditLocation} onClose={() => setActiveAuditLocation(null)} title={`Inventur · ${activeAuditLocation ?? ''}`} size="lg">
+        {activeAuditLocation && <LocationInventoryAuditView locationId={activeAuditLocation} products={products} />}
+      </Modal>
+
       <div className="text-right mt-6">
         <Button onClick={() => setShowCreateModal(true)} disabled={selectedAsins.size === 0}>Shop erstellen</Button>
       </div>
