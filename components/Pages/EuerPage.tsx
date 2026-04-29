@@ -145,6 +145,79 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
     exportEuerRowsToPdf(rows, selectedYear);
   };
 
+  const procedureAutoText = useMemo(() => {
+    const methode = settings.useTeilwertForIncome ? 'Teilwert' : 'ETV';
+    const entnahme =
+      settings.defaultPrivatentnahmeDelay === '14d'
+        ? '2 Wochen nach Bestellung'
+        : settings.defaultPrivatentnahmeDelay === '0d'
+          ? 'sofort'
+          : `${settings.defaultPrivatentnahmeDelay} nach Bestellung`;
+    const streu = settings.streuArtikelLimitActive
+      ? `Streuartikel unter ${new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(settings.streuArtikelLimitValue)} werden steuerlich nicht erfasst.`
+      : 'Die Streuartikelregelung wird derzeit nicht angewendet.';
+    return `Der Steuerpflichtige ermittelt den Wert der Testprodukte basierend auf ${methode}. Die Privatentnahme erfolgt standardmäßig ${entnahme}. ${streu}`;
+  }, [settings]);
+
+  useEffect(() => {
+    if (!isProcedureOpen || !apiToken) return;
+    (async () => {
+      const resp = await apiGetProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main');
+      if (resp.status !== 'success' || !resp.data?.length) return;
+      const entry = resp.data[0];
+      setLastUpdatedTs(entry.timestamp || null);
+      try {
+        const parsed = JSON.parse(entry.value || '{}');
+        setUseAutoText(parsed.useAutoText ?? true);
+        setCustomText(parsed.customText ?? '');
+        setStorageLocation(parsed.storageLocation ?? '');
+        setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
+        setOtherAccountingTool(parsed.otherAccountingTool ?? '');
+        setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
+      } catch (e) {
+        console.error('Verfahrensdoku konnte nicht geparst werden', e);
+      }
+    })();
+  }, [isProcedureOpen, apiToken, apiBaseUrl]);
+
+  const handleAddressChange = (key: 'nameOrCompany' | 'addressLine1' | 'addressLine2' | 'vatId' | 'isKleinunternehmer', value: string | boolean) => {
+    onBelegSettingsChange(prev => ({ ...prev, userData: { ...prev.userData, [key]: value } }));
+  };
+
+  const handleSaveProcedureDoc = async () => {
+    if (!apiToken) return alert('Bitte API Token konfigurieren, um die Verfahrensdoku zu speichern.');
+    const payload = JSON.stringify({ useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy });
+    const ts = Math.floor(Date.now() / 1000);
+    const resp = await apiUpdateProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main', payload, ts);
+    if (resp.status === 'success') {
+      setLastUpdatedTs(ts);
+      alert('Verfahrensdokumentation gespeichert.');
+    } else {
+      alert(`Fehler beim Speichern: ${resp.message || 'Unbekannt'}`);
+    }
+  };
+
+  const handleExportProcedurePdf = () => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const text = [
+      'GoBD Verfahrensdokumentation',
+      `Stand: ${lastUpdatedTs ? new Date(lastUpdatedTs * 1000).toLocaleString('de-DE') : 'nicht gespeichert'}`,
+      '',
+      'Allgemeine Beschreibung (global mit Belege synchronisiert)',
+      `${belegSettings.userData.nameOrCompany}, ${belegSettings.userData.addressLine1}, ${belegSettings.userData.addressLine2}`,
+      `USt-IdNr.: ${belegSettings.userData.vatId}, Kleinunternehmer: ${belegSettings.userData.isKleinunternehmer ? 'Ja' : 'Nein'}`,
+      '',
+      'Anwenderdokumentation / Wertermittlung',
+      useAutoText ? procedureAutoText : customText,
+      '',
+      `Lagerort: ${storageLocation}`,
+      `Weitere Software: ${accountingTool}${accountingTool === 'Sonstiges (Freitext)' ? ` - ${otherAccountingTool}` : ''}`,
+      `Backup-Strategie: ${backupStrategy}`,
+    ];
+    doc.text(doc.splitTextToSize(text.join('\n'), 180), 15, 15);
+    doc.save('GoBD_Verfahrensdokumentation.pdf');
+  };
+
   return (
     <div className="space-y-8">
       <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
