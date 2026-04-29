@@ -871,6 +871,10 @@ const App: React.FC = () => {
             settings={euerSettings} 
             onSettingsChange={setEuerSettings} 
             additionalExpenses={additionalExpenses}
+            apiToken={apiToken}
+            apiBaseUrl={apiBaseUrl}
+            belegSettings={belegSettings}
+            onBelegSettingsChange={setBelegSettings}
           />
         )}
         {activeTab === TAB_OPTIONS.VERMOEGEN && (
