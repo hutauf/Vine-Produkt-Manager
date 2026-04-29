@@ -371,23 +371,30 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
         <h4 className="text-md font-semibold text-gray-200 mb-2">Lager & Barcodes</h4>
         <div>
           <label className="block text-sm font-medium text-gray-300">Lagerort</label>
-          <div className="flex gap-2">
-            <select
-              value={formData.storageLocationId}
-              onChange={(e) => handleChange('storageLocationId', e.target.value)}
-              className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
-            >
-              <option value="">Kein Lagerort</option>
-              {locations.map(loc => (
-                <option key={loc.location_id} value={loc.location_id}>{loc.location_id}</option>
-              ))}
-            </select>
-            <input 
-              type="text" 
-              placeholder="Oder Freitext..." 
-              value={formData.storageLocationId}
-              onChange={(e) => handleChange('storageLocationId', e.target.value)}
-              className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+          <div className="flex flex-col gap-2 mt-1">
+            <div className="flex gap-2">
+              <select
+                value={formData.storageLocationId}
+                onChange={(e) => handleChange('storageLocationId', e.target.value)}
+                className="block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+              >
+                <option value="">Kein Lagerort</option>
+                {locations.map(loc => (
+                  <option key={loc.location_id} value={loc.location_id}>{loc.location_id}</option>
+                ))}
+              </select>
+              <input 
+                type="text" 
+                placeholder="Oder Freitext..." 
+                value={formData.storageLocationId}
+                onChange={(e) => handleChange('storageLocationId', e.target.value)}
+                className="block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+              />
+            </div>
+            <ScannerPanel 
+              title="Lagerort scannen" 
+              helpText="Scannen Sie einen Lagerort-QR-Code, um das Produkt direkt zuzuordnen."
+              onDetected={(code) => handleChange('storageLocationId', code)}
             />
           </div>
         </div>

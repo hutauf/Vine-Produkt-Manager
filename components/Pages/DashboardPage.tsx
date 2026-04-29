@@ -202,6 +202,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       
       <ProductPlots products={filteredProducts} yearFilter={yearFilter} />
 
+      <div className="mb-6">
+        <ScannerPanel
+          title="Scanner (Dashboard)"
+          helpText="Scannt Barcodes oder QR-Codes. Bei Treffer wird das Produktdetail geöffnet."
+          onDetected={handleScan}
+        />
+      </div>
+
       <div className="p-6 bg-slate-800 rounded-lg shadow-md border border-slate-700 mb-6">
         <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -221,13 +229,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
 
       <div>
-        <div className="mb-4">
-          <ScannerPanel
-            title="Scanner (Dashboard)"
-            helpText="Scannt Barcodes oder QR-Codes. Bei Treffer wird das Produktdetail geöffnet."
-            onDetected={handleScan}
-          />
-        </div>
         <h2 className="text-2xl font-semibold text-gray-100 mb-4">Produktliste ({filteredProducts.length})</h2>
         {filteredProducts.length > 0 ? (
             <ProductTable 

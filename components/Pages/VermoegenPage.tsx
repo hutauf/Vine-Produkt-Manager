@@ -235,12 +235,13 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
     setExpenseDateError(null);
   };
   
-  const productTableHeaders: {label: string, key: ProductSortKey}[] = [
+  const productTableHeaders: {label: string, key: ProductSortKey | 'storageLocationId'}[] = [
     { label: 'ASIN', key: 'ASIN' },
     { label: 'Name', key: 'name' },
     { label: 'Bestelldatum', key: 'date' },
     { label: 'ETV', key: 'etv' },
     { label: 'Teilwert', key: 'calculatedTeilwert' },
+    { label: 'Lagerort', key: 'storageLocationId' },
   ];
 
   const renderProductTable = (
@@ -275,9 +276,9 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                 {productTableHeaders.map(header => (
                    <th
                         key={header.key}
-                        onClick={() => handleProductSort(header.key)}
-                        className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-slate-700">
-                        {header.label} {renderProductSortIcon(header.key)}
+                        onClick={() => header.key !== 'storageLocationId' ? handleProductSort(header.key as ProductSortKey) : null}
+                        className={`px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider ${header.key !== 'storageLocationId' ? 'cursor-pointer hover:bg-slate-700' : ''}`}>
+                        {header.label} {header.key !== 'storageLocationId' && renderProductSortIcon(header.key as ProductSortKey)}
                     </th>
                 ))}
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Aktion</th>
@@ -298,6 +299,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatDate(p.orderDateObj)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(p.etv)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{hasTeilwert(p) ? formatCurrency(getCalculatedTeilwert(p)) : 'N/A'}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-center">{p.storageLocationId ? '✅' : ''}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm">
                     <Button size="sm" variant="ghost" onClick={() => setEditingProduct(p)} title="Produkt bearbeiten">
                       <FaEdit />
