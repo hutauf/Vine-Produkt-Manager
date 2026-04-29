@@ -114,9 +114,7 @@ const createProcedureDocPdf = (variables: {
     { id: '2.1', title: '2.1. Erfassung und Lagerung', level: 2, body: ['Die Erfassung der bestellten und gelieferten Produkte erfolgt digital über das Tool "Vine Produkt Manager". Während der von Amazon vorgeschriebenen sechsmonatigen Sperrfrist, in der die Produkte im Eigentum von Amazon verbleiben bzw. nicht frei verwertbar sind, erfolgt die physische Aufbewahrung an folgendem Ort:', `${variables.lagerort}.`] },
     { id: '2.2', title: '2.2. Wertermittlung und Privatentnahme', level: 2, body: ['Die steuerliche Bemessungsgrundlage der erhaltenen Produkte wird nach fest definierten Regeln ermittelt. Hierfür gilt folgender, vom Steuerpflichtigen festgelegter Prozess:', variables.wertText] },
     { id: '3', title: '3. Technische Systemdokumentation', level: 1 },
-    { id: '3.1', title: '3.1. Eingesetzte Systeme', level: 2, body: [variables.software
-      ? `Die primäre Erfassung, Verwaltung und Historisierung der Testprodukte erfolgt durch die Software "Vine Produkt Manager". Sofern eine weitere Software für die finale Rechnungserstellung, Buchhaltung oder Übermittlung an das Finanzamt genutzt wird, handelt es sich um: ${variables.software}. Ist hier keine Software aufgeführt, erfolgt die Übertragung der ermittelten Summen direkt in das ELSTER-Portal der Finanzverwaltung.`
-      : 'Die primäre Erfassung, Verwaltung und Historisierung der Testprodukte erfolgt durch die Software "Vine Produkt Manager". Ist hier keine weitere Software aufgeführt, erfolgt die Übertragung der ermittelten Summen direkt in das ELSTER-Portal der Finanzverwaltung.'] },
+    { id: '3.1', title: '3.1. Eingesetzte Systeme', level: 2, body: [`Die primäre Erfassung, Verwaltung und Historisierung der Testprodukte erfolgt durch die Software "Vine Produkt Manager". Sofern eine weitere Software für die finale Rechnungserstellung, Buchhaltung oder Übermittlung an das Finanzamt genutzt wird, handelt es sich um: ${variables.software}. Ist hier keine Software aufgeführt, erfolgt die Übertragung der ermittelten Summen direkt in das ELSTER-Portal der Finanzverwaltung.`] },
     { id: '4', title: '4. Betriebsdokumentation', level: 1 },
     { id: '4.1', title: '4.1. Unveränderbarkeit und Revisionssicherheit', level: 2, body: ['Um die gesetzlich vorgeschriebene Unveränderbarkeit von Buchungsdatensätzen (§ 146 Abs. 4 AO) zu gewährleisten, greifen folgende technische und organisatorische Schutzmaßnahmen:', PROCEDURE_SECURITY_TEXT] },
     { id: '4.2', title: '4.2. Datensicherung und Aufbewahrung', level: 2, body: ['Der Steuerpflichtige ist für die Einhaltung der 10-jährigen gesetzlichen Aufbewahrungsfrist der digitalen Unterlagen selbst verantwortlich. Um Datenverlust vorzubeugen, wird folgende Backup-Strategie für die lokale Datenbank des Vine Produkt Managers angewendet:', `Die Sicherung erfolgt über: ${variables.backup}.`] },
@@ -362,11 +360,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       uhrzeitHeute,
       wertText: (useAutoText ? procedureAutoText : customText).trim() || 'Nicht angegeben.',
       lagerort: (storageLocation || 'Nicht angegeben').trim(),
-      software: (() => {
-        if (accountingTool === 'Keines (Direkt Elster)') return '';
-        if (accountingTool === 'Sonstiges (Freitext)') return (otherAccountingTool || '').trim();
-        return accountingTool.trim();
-      })(),
+      software: (accountingTool === 'Sonstiges (Freitext)' ? otherAccountingTool : accountingTool).trim() || 'Keine zusätzliche Software',
       backup: (backupStrategy || 'Nicht angegeben').trim(),
     });
 
