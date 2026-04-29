@@ -202,6 +202,7 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
   const [createdAtTs, setCreatedAtTs] = useState<number | null>(null);
   const [isProcedureDirty, setIsProcedureDirty] = useState(false);
   const [hasLoadedProcedureDoc, setHasLoadedProcedureDoc] = useState(false);
+  const [savedProcedureSnapshot, setSavedProcedureSnapshot] = useState('');
 
   const availableYears = useMemo(() => {
     const years = new Set<string>();
@@ -342,40 +343,55 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
     return `Der Steuerpflichtige ermittelt den Wert der Testprodukte basierend auf ${methode}. Die Privatentnahme erfolgt standardmäßig ${entnahme}. ${streu}`;
   }, [settings]);
 
+  const buildProcedureSnapshot = () => JSON.stringify({
+    useAutoText,
+    customText,
+    storageLocation,
+    accountingTool,
+    otherAccountingTool,
+    backupStrategy,
+    userData: belegSettings.userData,
+  });
+
   useEffect(() => {
     if (!isProcedureOpen || !apiToken) return;
     (async () => {
       const resp = await apiGetProcedureDoc(apiBaseUrl, apiToken, 'verfahrensdoku-main');
-      if (resp.status !== 'success' || !resp.data?.length) return;
-      const entry = resp.data[0];
-        setLastUpdatedTs(entry.timestamp || null);
-        setCreatedAtTs(entry.timestamp || null);
-      try {
-        const parsed = JSON.parse(entry.value || '{}');
-        setUseAutoText(parsed.useAutoText ?? true);
-        setCustomText(parsed.customText ?? '');
-        setStorageLocation(parsed.storageLocation ?? '');
-        setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
-        setOtherAccountingTool(parsed.otherAccountingTool ?? '');
-        setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
-        const parsedHistory = Array.isArray(parsed.versionHistory) ? parsed.versionHistory : [];
-        const normalizedHistory = parsedHistory
-          .filter((h: any) => typeof h?.version === 'number' && typeof h?.timestamp === 'number' && typeof h?.docId === 'string')
-          .map((h: any) => ({ version: h.version, timestamp: h.timestamp, docId: h.docId })) as ProcedureDocVersion[];
-        setProcedureVersions(normalizedHistory);
-        if (typeof parsed.createdAt === 'number') setCreatedAtTs(parsed.createdAt);
-        setIsProcedureDirty(false);
-        setHasLoadedProcedureDoc(true);
-      } catch (e) {
-        console.error('Verfahrensdoku konnte nicht geparst werden', e);
+      if (resp.status === 'success' && resp.data?.length) {
+        const entry = resp.data[0];
+          setLastUpdatedTs(entry.timestamp || null);
+          setCreatedAtTs(entry.timestamp || null);
+        try {
+          const parsed = JSON.parse(entry.value || '{}');
+          setUseAutoText(parsed.useAutoText ?? true);
+          setCustomText(parsed.customText ?? '');
+          setStorageLocation(parsed.storageLocation ?? '');
+          setAccountingTool(parsed.accountingTool ?? 'Keines (Direkt Elster)');
+          setOtherAccountingTool(parsed.otherAccountingTool ?? '');
+          setBackupStrategy(parsed.backupStrategy ?? 'Lokale Festplatte');
+          const parsedHistory = Array.isArray(parsed.versionHistory) ? parsed.versionHistory : [];
+          const normalizedHistory = parsedHistory
+            .filter((h: any) => typeof h?.version === 'number' && typeof h?.timestamp === 'number' && typeof h?.docId === 'string')
+            .map((h: any) => ({ version: h.version, timestamp: h.timestamp, docId: h.docId })) as ProcedureDocVersion[];
+          setProcedureVersions(normalizedHistory);
+          if (typeof parsed.createdAt === 'number') setCreatedAtTs(parsed.createdAt);
+        } catch (e) {
+          console.error('Verfahrensdoku konnte nicht geparst werden', e);
+        }
       }
+      setHasLoadedProcedureDoc(true);
     })();
   }, [isProcedureOpen, apiToken, apiBaseUrl]);
 
   useEffect(() => {
-    if (!isProcedureOpen || !hasLoadedProcedureDoc) return;
-    setIsProcedureDirty(true);
-  }, [useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy, belegSettings.userData, isProcedureOpen, hasLoadedProcedureDoc]);
+    if (!isProcedureOpen || !hasLoadedProcedureDoc || !apiToken) return;
+    if (!savedProcedureSnapshot) {
+      setSavedProcedureSnapshot(buildProcedureSnapshot());
+      setIsProcedureDirty(false);
+      return;
+    }
+    setIsProcedureDirty(buildProcedureSnapshot() !== savedProcedureSnapshot);
+  }, [useAutoText, customText, storageLocation, accountingTool, otherAccountingTool, backupStrategy, belegSettings.userData, isProcedureOpen, hasLoadedProcedureDoc, savedProcedureSnapshot, apiToken]);
 
   const handleAddressChange = (key: 'nameOrCompany' | 'addressLine1' | 'addressLine2' | 'vatId' | 'isKleinunternehmer', value: string | boolean) => {
     onBelegSettingsChange(prev => ({ ...prev, userData: { ...prev.userData, [key]: value } }));
@@ -397,6 +413,8 @@ const EuerPage: React.FC<EuerPageProps> = ({ products, settings, onSettingsChang
       setLastUpdatedTs(ts);
       setCreatedAtTs(effectiveCreatedAt);
       setProcedureVersions(nextHistory);
+      const currentSnapshot = buildProcedureSnapshot();
+      setSavedProcedureSnapshot(currentSnapshot);
       setIsProcedureDirty(false);
       alert('Verfahrensdokumentation gespeichert.');
     } else {
