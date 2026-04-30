@@ -51,6 +51,12 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
     }, 1500); // Wait 1.5s to show success then close
   };
 
+  // Keep a ref to the latest handleDetect
+  const handleDetectRef = useRef(handleDetect);
+  useEffect(() => {
+    handleDetectRef.current = handleDetect;
+  }, [handleDetect]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -62,7 +68,13 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
           const storedCamId = localStorage.getItem(cameraStorageKey);
           const knownStoredCam = storedCamId && devices.some((d) => d.id === storedCamId) ? storedCamId : '';
           const defaultCamId = selectedCamera || knownStoredCam || findBestDefaultCamera(devices);
-          if (!selectedCamera && defaultCamId) setSelectedCamera(defaultCamId);
+          
+          if (!selectedCamera && defaultCamId) {
+            setSelectedCamera(defaultCamId);
+            // Return early! Let the next render cycle (which now has selectedCamera set) start the scanner.
+            // This prevents a stale closure where the scanner starts but the effect cleans up immediately.
+            return;
+          }
           
           const html5QrCode = new Html5Qrcode(scannerContainerId);
           scannerRef.current = html5QrCode;
@@ -71,7 +83,7 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
             defaultCamId, 
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-              if (isMounted) handleDetect(decodedText);
+              handleDetectRef.current(decodedText);
             },
             (error) => {} // ignore
           ).catch((err) => {
