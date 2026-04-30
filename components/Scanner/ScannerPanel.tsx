@@ -6,15 +6,19 @@ interface ScannerPanelProps {
   title: string;
   helpText?: string;
   onDetected: (code: string) => Promise<void> | void;
+  cameraPreferenceKey?: string;
 }
 
-const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected }) => {
+const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected, cameraPreferenceKey = 'default' }) => {
   const [manualCode, setManualCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
+  const [lastSuccessCode, setLastSuccessCode] = useState<string>('');
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isHandlingDetectionRef = useRef(false);
   const lastScannedRef = useRef<{code: string, time: number} | null>(null);
+  const cameraStorageKey = `scanner:lastCamera:${cameraPreferenceKey}`;
   const scannerContainerId = useMemo(() => `qr-reader-${title.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).substring(7)}`, [title]);
 
   const playSound = () => {
@@ -24,7 +28,13 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
     } catch (e) {}
   };
 
-  const handleDetect = (code: string) => {
+  const findBestDefaultCamera = (devices: CameraDevice[]) => {
+    const preferred = devices.find((cam) => /back|rear|environment|rück/i.test(cam.label || ''));
+    return preferred?.id || devices[0]?.id || '';
+  };
+
+  const handleDetect = async (code: string) => {
+    if (isHandlingDetectionRef.current) return;
     const now = Date.now();
     if (lastScannedRef.current) {
       const { code: lastCode, time: lastTime } = lastScannedRef.current;
@@ -33,10 +43,16 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
         return;
       }
     }
+    isHandlingDetectionRef.current = true;
     lastScannedRef.current = { code, time: now };
     playSound();
+    setLastSuccessCode(code);
     setIsScanning(false); // Stop scanner automatically after a successful read
-    onDetected(code);
+    try {
+      await onDetected(code);
+    } finally {
+      isHandlingDetectionRef.current = false;
+    }
   };
 
   const triggerScan = async () => {
@@ -54,8 +70,10 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
         if (!isMounted) return;
         if (devices && devices.length) {
           setCameras(devices);
-          const defaultCamId = selectedCamera || devices[0].id;
-          if (!selectedCamera) setSelectedCamera(devices[0].id);
+          const storedCamId = localStorage.getItem(cameraStorageKey);
+          const knownStoredCam = storedCamId && devices.some((d) => d.id === storedCamId) ? storedCamId : '';
+          const defaultCamId = selectedCamera || knownStoredCam || findBestDefaultCamera(devices);
+          if (!selectedCamera && defaultCamId) setSelectedCamera(defaultCamId);
           
           const html5QrCode = new Html5Qrcode(scannerContainerId);
           scannerRef.current = html5QrCode;
@@ -99,7 +117,7 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
     return () => {
       isMounted = false;
     };
-  }, [isScanning, scannerContainerId, onDetected, selectedCamera]);
+  }, [cameraStorageKey, isScanning, scannerContainerId, onDetected, selectedCamera]);
 
   // Handle unmount cleanup separately so it only runs when the component actually unmounts
   useEffect(() => {
@@ -148,15 +166,17 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
           <select
             value={selectedCamera}
             onChange={(e) => {
+              const nextCamera = e.target.value;
+              localStorage.setItem(cameraStorageKey, nextCamera);
               // Stop current scan before changing camera state
               if (scannerRef.current) {
                 setIsScanning(false);
                 setTimeout(() => {
-                  setSelectedCamera(e.target.value);
+                  setSelectedCamera(nextCamera);
                   setIsScanning(true);
                 }, 500); // Give it half a second to completely tear down
               } else {
-                setSelectedCamera(e.target.value);
+                setSelectedCamera(nextCamera);
               }
             }}
             className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 text-sm"
@@ -171,6 +191,12 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
       <div className={`mt-4 bg-slate-200 rounded-lg overflow-hidden ${isScanning ? 'block' : 'hidden'}`}>
         <div id={scannerContainerId}></div>
       </div>
+
+      {lastSuccessCode && !isScanning && (
+        <div className="text-emerald-300 text-sm bg-emerald-900/30 border border-emerald-700 rounded-md px-3 py-2">
+          Erfolgreich gescannt: <span className="font-mono">{lastSuccessCode}</span>
+        </div>
+      )}
     </div>
   );
 };

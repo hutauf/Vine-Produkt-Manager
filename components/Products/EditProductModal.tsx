@@ -4,7 +4,7 @@ import { Product, ProductUsage, EuerSettings, BelegSettings, ProductHistoryEntry
 import { PRODUCT_USAGE_OPTIONS } from '../../constants';
 import Modal from '../Common/Modal';
 import Button from '../Common/Button';
-import { FaRegCalendarCheck, FaExclamationTriangle, FaSave, FaCheckCircle } from 'react-icons/fa';
+import { FaRegCalendarCheck, FaExclamationTriangle, FaSave, FaCheckCircle, FaWarehouse, FaBarcode } from 'react-icons/fa';
 import {
     parseGermanDate,
     getTodayGermanFormat,
@@ -391,11 +391,18 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                 className="block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
               />
             </div>
-            <ScannerPanel 
+            <div className="rounded-md border border-sky-700/60 bg-sky-900/20 p-2">
+              <div className="flex items-center gap-2 text-sky-200 mb-2 text-sm font-medium">
+                <FaWarehouse />
+                <span>Lagerort-Scan</span>
+              </div>
+              <ScannerPanel 
               title="Lagerort scannen" 
               helpText="Scannen Sie einen Lagerort-QR-Code, um das Produkt direkt zuzuordnen."
+              cameraPreferenceKey="storage-location"
               onDetected={(code) => handleChange('storageLocationId', code)}
             />
+            </div>
           </div>
         </div>
         
@@ -411,12 +418,18 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
               ))}
             </ul>
           )}
-          <ScannerPanel 
+          <div className="rounded-md border border-violet-700/60 bg-violet-900/20 p-2">
+            <div className="flex items-center gap-2 text-violet-200 mb-2 text-sm font-medium">
+              <FaBarcode />
+              <span>Produktcode-Scan</span>
+            </div>
+            <ScannerPanel 
             title="Neuen Code scannen" 
             helpText="Scannen Sie einen Barcode oder QR-Code, um ihn diesem Produkt zuzuordnen."
+            cameraPreferenceKey="product-code"
             onDetected={(code) => {
               if (code === product.ASIN) {
-                alert(`Der gescannte Code ist die ASIN (${code}). Dies ist dem Produkt ohnehin fest zugeordnet und muss nicht als extra Barcode gespeichert werden.`);
+                alert(`Erfolgreich gescannt: ${code}. Das ist die ASIN dieses Produkts und daher bereits hinterlegt.`);
               } else if (formData.barcodes.includes(code)) {
                 alert(`Der Code ${code} ist bereits in der Liste vorhanden.`);
               } else {
@@ -424,6 +437,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
               }
             }}
           />
+          </div>
         </div>
 
         <div className="mt-4">
