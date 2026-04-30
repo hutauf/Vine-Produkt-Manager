@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Button from '../Common/Button';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
+import { FaCamera, FaTimes, FaCheckCircle, FaSyncAlt } from 'react-icons/fa';
 
 interface ScannerPanelProps {
   title: string;
@@ -9,15 +10,13 @@ interface ScannerPanelProps {
   cameraPreferenceKey?: string;
 }
 
-const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected, cameraPreferenceKey = 'default' }) => {
-  const [manualCode, setManualCode] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
+const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
-  const [lastSuccessCode, setLastSuccessCode] = useState<string>('');
+  const [successCode, setSuccessCode] = useState<string>('');
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isHandlingDetectionRef = useRef(false);
-  const lastScannedRef = useRef<{code: string, time: number} | null>(null);
   const cameraStorageKey = `scanner:lastCameraGlobal`;
   const scannerContainerId = useMemo(() => `qr-reader-${title.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).substring(7)}`, [title]);
 
@@ -35,41 +34,27 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
 
   const handleDetect = async (code: string) => {
     if (isHandlingDetectionRef.current) return;
-    
-    const now = Date.now();
-    if (lastScannedRef.current) {
-      const { code: lastCode, time: lastTime } = lastScannedRef.current;
-      if (code === lastCode && (now - lastTime) < 2000) {
-        return;
-      }
-    }
-    
-    // Lock it immediately
     isHandlingDetectionRef.current = true;
-    lastScannedRef.current = { code, time: now };
+    
     playSound();
-    setLastSuccessCode(code);
-    setIsScanning(false); // Stop scanner automatically after a successful read
+    setSuccessCode(code);
     
     try {
       await onDetected(code);
     } catch (e) {
       console.error('Error in onDetected', e);
     }
-  };
 
-  const triggerScan = async () => {
-    if (!manualCode.trim()) return;
-    setIsScanning(false); // Stop camera if manual entry is used while scanning
-    isHandlingDetectionRef.current = false; // Reset for manual scan
-    handleDetect(manualCode.trim());
-    setManualCode('');
+    setTimeout(() => {
+      setIsModalOpen(false);
+      setSuccessCode('');
+    }, 1500); // Wait 1.5s to show success then close
   };
 
   useEffect(() => {
     let isMounted = true;
 
-    if (isScanning && !scannerRef.current) {
+    if (isModalOpen && !successCode && !scannerRef.current) {
       Html5Qrcode.getCameras().then((devices) => {
         if (!isMounted) return;
         if (devices && devices.length) {
@@ -88,29 +73,22 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
             (decodedText) => {
               if (isMounted) handleDetect(decodedText);
             },
-            (error) => {
-              // Ignore frequent error callbacks for not finding a barcode
-            }
+            (error) => {} // ignore
           ).catch((err) => {
             console.error('Failed to start scanner', err);
-            if (isMounted) setIsScanning(false);
           });
         }
       }).catch((err) => {
         console.error('Failed to get cameras', err);
-        if (isMounted) setIsScanning(false);
       });
-    } else if (!isScanning && scannerRef.current) {
-      // It's crucial that the DOM element still exists when stop() and clear() are called.
-      // We also handle the case where stop() might fail if it wasn't fully started.
+    } else if ((!isModalOpen || successCode) && scannerRef.current) {
       const html5QrCode = scannerRef.current;
-      scannerRef.current = null; // Detach immediately to prevent double-calls
+      scannerRef.current = null;
       
       try {
         html5QrCode.stop().then(() => {
-          html5QrCode.clear();
+          try { html5QrCode.clear(); } catch (e) {}
         }).catch(e => {
-          console.warn('Failed to stop scanner smoothly, trying clear anyway', e);
           try { html5QrCode.clear(); } catch (err) {}
         });
       } catch (err) {
@@ -121,9 +99,8 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
     return () => {
       isMounted = false;
     };
-  }, [cameraStorageKey, isScanning, scannerContainerId, onDetected, selectedCamera]);
+  }, [cameraStorageKey, isModalOpen, scannerContainerId, selectedCamera, successCode]);
 
-  // Handle unmount cleanup separately so it only runs when the component actually unmounts
   useEffect(() => {
     return () => {
       if (scannerRef.current) {
@@ -141,73 +118,83 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
   }, []);
 
   return (
-    <div className="p-4 rounded-lg border border-slate-700 bg-slate-800 space-y-3">
-      <h3 className="text-lg font-semibold text-gray-100">{title}</h3>
-      {helpText && <p className="text-sm text-gray-400">{helpText}</p>}
-      <div className="flex gap-2">
-        <input
-          value={manualCode}
-          onChange={(e) => setManualCode(e.target.value)}
-          placeholder="Barcode/QR-Code"
-          className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-gray-100"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              triggerScan();
-            }
-          }}
-        />
-        <Button onClick={triggerScan} disabled={!manualCode.trim()}>
-          Prüfen
-        </Button>
-      </div>
-      
-      <div className="flex flex-wrap gap-2 items-center">
-        <Button variant="secondary" onClick={() => {
-          if (!isScanning) {
-            isHandlingDetectionRef.current = false;
-            setLastSuccessCode('');
-          }
-          setIsScanning((prev) => !prev);
-        }}>
-          {isScanning ? 'Kamera-Scanner stoppen' : 'Kamera-Scanner starten'}
-        </Button>
-        
-        {isScanning && cameras.length > 1 && (
-          <select
-            value={selectedCamera}
-            onChange={(e) => {
-              const nextCamera = e.target.value;
-              localStorage.setItem(cameraStorageKey, nextCamera);
-              // Stop current scan before changing camera state
-              if (scannerRef.current) {
-                setIsScanning(false);
-                setTimeout(() => {
-                  setSelectedCamera(nextCamera);
-                  setIsScanning(true);
-                }, 500); // Give it half a second to completely tear down
-              } else {
-                setSelectedCamera(nextCamera);
-              }
-            }}
-            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 text-sm"
-          >
-            {cameras.map(cam => (
-              <option key={cam.id} value={cam.id}>{cam.label || `Kamera ${cam.id}`}</option>
-            ))}
-          </select>
-        )}
-      </div>
+    <>
+      <Button 
+        variant="secondary" 
+        onClick={() => {
+          setSuccessCode('');
+          isHandlingDetectionRef.current = false;
+          setIsModalOpen(true);
+        }}
+        leftIcon={<FaCamera />}
+      >
+        {title}
+      </Button>
 
-      <div className={`mt-4 bg-slate-200 rounded-lg overflow-hidden ${isScanning ? 'block' : 'hidden'}`}>
-        <div id={scannerContainerId}></div>
-      </div>
-
-      {lastSuccessCode && !isScanning && (
-        <div className="text-emerald-300 text-sm bg-emerald-900/30 border border-emerald-700 rounded-md px-3 py-2">
-          Erfolgreich gescannt: <span className="font-mono">{lastSuccessCode}</span>
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900 animate-in fade-in zoom-in-95 duration-200">
+          <div className="flex justify-between items-center p-4 bg-slate-800 border-b border-slate-700 shadow-md">
+            <div>
+              <h3 className="text-xl font-bold text-white">{title}</h3>
+              {helpText && <p className="text-sm text-gray-400 mt-1">{helpText}</p>}
+            </div>
+            <button 
+              onClick={() => {
+                setIsModalOpen(false);
+                setSuccessCode('');
+              }} 
+              className="p-3 text-gray-400 hover:text-white rounded-full bg-slate-700 hover:bg-slate-600 transition-colors"
+            >
+              <FaTimes className="text-xl" />
+            </button>
+          </div>
+          
+          <div className="flex-1 flex flex-col items-center justify-center p-4 relative bg-black">
+            {successCode ? (
+              <div className="text-center animate-in zoom-in fade-in duration-300">
+                <FaCheckCircle className="text-6xl text-emerald-500 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Erfolgreich gescannt!</h2>
+                <p className="text-emerald-300 text-2xl font-mono bg-emerald-900/30 p-4 rounded border border-emerald-700">{successCode}</p>
+              </div>
+            ) : (
+              <>
+                <div id={scannerContainerId} className="w-full max-w-lg rounded-xl overflow-hidden shadow-2xl bg-slate-800"></div>
+                {cameras.length > 1 && (
+                  <div className="absolute bottom-8 flex justify-center w-full">
+                    <Button 
+                      variant="secondary" 
+                      onClick={() => {
+                        const currentIndex = cameras.findIndex(c => c.id === selectedCamera);
+                        const nextIndex = (currentIndex + 1) % cameras.length;
+                        const nextCamera = cameras[nextIndex].id;
+                        localStorage.setItem(cameraStorageKey, nextCamera);
+                        if (scannerRef.current) {
+                           const oldScanner = scannerRef.current;
+                           scannerRef.current = null;
+                           oldScanner.stop().then(() => {
+                             oldScanner.clear();
+                             setSelectedCamera(nextCamera);
+                           }).catch(() => {
+                             try { oldScanner.clear(); } catch(e) {}
+                             setSelectedCamera(nextCamera);
+                           });
+                        } else {
+                           setSelectedCamera(nextCamera);
+                        }
+                      }} 
+                      leftIcon={<FaSyncAlt />}
+                      className="shadow-xl bg-slate-800/80 backdrop-blur-md border-slate-600 text-white"
+                    >
+                      Kamera wechseln
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
