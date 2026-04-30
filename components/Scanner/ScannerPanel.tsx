@@ -18,7 +18,7 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isHandlingDetectionRef = useRef(false);
   const lastScannedRef = useRef<{code: string, time: number} | null>(null);
-  const cameraStorageKey = `scanner:lastCamera:${cameraPreferenceKey}`;
+  const cameraStorageKey = `scanner:lastCameraGlobal`;
   const scannerContainerId = useMemo(() => `qr-reader-${title.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).substring(7)}`, [title]);
 
   const playSound = () => {
@@ -35,29 +35,33 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
 
   const handleDetect = async (code: string) => {
     if (isHandlingDetectionRef.current) return;
+    
     const now = Date.now();
     if (lastScannedRef.current) {
       const { code: lastCode, time: lastTime } = lastScannedRef.current;
-      // Debounce: ignore same code within 2 seconds
       if (code === lastCode && (now - lastTime) < 2000) {
         return;
       }
     }
+    
+    // Lock it immediately
     isHandlingDetectionRef.current = true;
     lastScannedRef.current = { code, time: now };
     playSound();
     setLastSuccessCode(code);
     setIsScanning(false); // Stop scanner automatically after a successful read
+    
     try {
       await onDetected(code);
-    } finally {
-      isHandlingDetectionRef.current = false;
+    } catch (e) {
+      console.error('Error in onDetected', e);
     }
   };
 
   const triggerScan = async () => {
     if (!manualCode.trim()) return;
     setIsScanning(false); // Stop camera if manual entry is used while scanning
+    isHandlingDetectionRef.current = false; // Reset for manual scan
     handleDetect(manualCode.trim());
     setManualCode('');
   };
@@ -158,7 +162,13 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
       </div>
       
       <div className="flex flex-wrap gap-2 items-center">
-        <Button variant="secondary" onClick={() => setIsScanning((prev) => !prev)}>
+        <Button variant="secondary" onClick={() => {
+          if (!isScanning) {
+            isHandlingDetectionRef.current = false;
+            setLastSuccessCode('');
+          }
+          setIsScanning((prev) => !prev);
+        }}>
           {isScanning ? 'Kamera-Scanner stoppen' : 'Kamera-Scanner starten'}
         </Button>
         

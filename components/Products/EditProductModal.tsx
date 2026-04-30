@@ -391,9 +391,12 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                 className="block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
               />
             </div>
-            <div className="rounded-md border border-sky-700/60 bg-sky-900/20 p-2">
-              <div className="flex items-center gap-2 text-sky-200 mb-2 text-sm font-medium">
-                <FaWarehouse />
+            <div className="rounded-md border-2 border-sky-600 bg-sky-900/30 p-4 shadow-inner relative">
+              <div className="absolute top-4 right-4 text-4xl opacity-50">
+                📦
+              </div>
+              <div className="flex items-center gap-2 text-sky-200 mb-3 text-lg font-semibold">
+                <FaWarehouse className="text-xl" />
                 <span>Lagerort-Scan</span>
               </div>
               <ScannerPanel 
@@ -418,9 +421,12 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
               ))}
             </ul>
           )}
-          <div className="rounded-md border border-violet-700/60 bg-violet-900/20 p-2">
-            <div className="flex items-center gap-2 text-violet-200 mb-2 text-sm font-medium">
-              <FaBarcode />
+          <div className="rounded-md border-2 border-violet-600 bg-violet-900/30 p-4 shadow-inner relative">
+             <div className="absolute top-4 right-4 text-4xl opacity-50">
+                🏷️
+              </div>
+            <div className="flex items-center gap-2 text-violet-200 mb-3 text-lg font-semibold">
+              <FaBarcode className="text-xl" />
               <span>Produktcode-Scan</span>
             </div>
             <ScannerPanel 
@@ -429,10 +435,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             cameraPreferenceKey="product-code"
             onDetected={(code) => {
               if (code === product.ASIN) {
-                alert(`Erfolgreich gescannt: ${code}. Das ist die ASIN dieses Produkts und daher bereits hinterlegt.`);
-              } else if (formData.barcodes.includes(code)) {
-                alert(`Der Code ${code} ist bereits in der Liste vorhanden.`);
-              } else {
+                // Do nothing, ScannerPanel already shows "Erfolgreich gescannt"
+              } else if (!formData.barcodes.includes(code)) {
                 handleChange('barcodes', [...formData.barcodes, code]);
               }
             }}
