@@ -290,7 +290,11 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
                       setSelectedAsins(set);
                     }} />
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-sky-400">{p.ASIN}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-sky-400">
+                    <a href={`https://www.amazon.de/dp/${p.ASIN}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {p.ASIN}
+                    </a>
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-200 max-w-xs truncate" title={p.name}>{p.name}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatDate(p.orderDateObj)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(p.etv)}</td>
