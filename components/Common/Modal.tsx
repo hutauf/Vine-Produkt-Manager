@@ -5,10 +5,11 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 'md' }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, footer, size = 'md' }) => {
   if (!isOpen) return null;
 
   const sizeClasses = {
@@ -26,9 +27,9 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
         aria-labelledby="modal-title"
     >
       <div 
-        className={`bg-slate-800 rounded-lg shadow-xl w-full ${sizeClasses[size]} flex flex-col animate-modal-scale-in max-h-[90vh]`}
+        className={`bg-slate-800 rounded-lg shadow-xl w-full ${sizeClasses[size]} flex max-h-[90vh] flex-col overflow-hidden animate-modal-scale-in`}
       >
-        <div className="flex justify-between items-center p-4 sm:p-6 border-b border-slate-700">
+        <div className="flex flex-shrink-0 justify-between items-center p-4 sm:p-6 border-b border-slate-700">
           <h3 id="modal-title" className="text-xl font-semibold text-white">{title}</h3>
           <button
             onClick={onClose}
@@ -40,10 +41,15 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
             </svg>
           </button>
         </div>
-        {/* Content area made scrollable if children overflow */}
-        <div className="text-gray-300 p-4 sm:p-6 overflow-y-auto flex-grow">
+        {/* Only the content area scrolls; header and optional footer remain visible. */}
+        <div className="min-h-0 flex-grow overflow-y-auto p-4 text-gray-300 sm:p-6">
             {children}
         </div>
+        {footer && (
+          <div className="flex-shrink-0 border-t border-slate-700 p-4 sm:p-6">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

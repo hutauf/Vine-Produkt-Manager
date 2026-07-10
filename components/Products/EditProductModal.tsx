@@ -297,8 +297,42 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
 
   return (
     <>
-    <Modal isOpen={isOpen && !showGoBDConfirmModal} onClose={onClose} title={`Produkt bearbeiten: ${product.name.substring(0,30)}...`} size="lg">
-      <div className="space-y-4 max-h-[calc(80vh-100px)] overflow-y-auto pr-2 pb-4">
+    <Modal
+      isOpen={isOpen && !showGoBDConfirmModal}
+      onClose={onClose}
+      title={`Produkt bearbeiten: ${product.name.substring(0,30)}...`}
+      size="lg"
+      footer={(
+        <div className="flex flex-wrap justify-end gap-3">
+          {product.myTeilwert !== null && (
+              <Button variant="ghost" onClick={() => { handleChange('myTeilwert', ''); handleChange('myTeilwertReason', ''); }} disabled={isSaving || isSavingAndFinalizing}>
+              Eigenen Teilwert zurücksetzen
+          </Button>
+          )}
+          <Button variant="secondary" onClick={onClose} disabled={isSaving || isSavingAndFinalizing}>Abbrechen</Button>
+          <Button
+              onClick={() => handleAttempt('save')}
+              disabled={isSaving || isSavingAndFinalizing || isSaleDateVisuallyInvalid || isPrivatentnahmeDateVisuallyInvalid || (isSold && isSalePriceInvalid)}
+              isLoading={isSaving}
+              leftIcon={<FaSave />}
+          >
+            {isSaving ? 'Speichert...' : 'Speichern'}
+          </Button>
+          {onSaveAndFinalize && (
+              <Button
+                  onClick={() => handleAttempt('saveAndFinalize')}
+                  disabled={isSaving || isSavingAndFinalizing || !canFinalize || isSaleDateVisuallyInvalid || isPrivatentnahmeDateVisuallyInvalid || (isSold && isSalePriceInvalid)}
+                  isLoading={isSavingAndFinalizing}
+                  leftIcon={<FaCheckCircle />}
+                  title={!canFinalize ? finalizeDisabledTooltip : "Speichern und Beleg festschreiben"}
+              >
+              {isSavingAndFinalizing ? 'Wird festgeschr...' : 'Speichern & Festschreiben'}
+              </Button>
+          )}
+        </div>
+      )}
+    >
+      <div className="space-y-4">
         {modalError && (
             <div className="bg-red-500 text-white p-3 rounded-md text-sm mb-4">{modalError}</div>
         )}
@@ -525,33 +559,6 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
                     </tbody>
                 </table>
             </div>
-        )}
-      </div>
-      <div className="flex flex-wrap justify-end space-x-3 pt-4 border-t border-slate-700 mt-4">
-        {product.myTeilwert !== null && (
-            <Button variant="ghost" onClick={() => { handleChange('myTeilwert', ''); handleChange('myTeilwertReason', ''); }} disabled={isSaving || isSavingAndFinalizing}>
-            Eigenen Teilwert zurücksetzen
-        </Button>
-        )}
-        <Button variant="secondary" onClick={onClose} disabled={isSaving || isSavingAndFinalizing}>Abbrechen</Button>
-        <Button
-            onClick={() => handleAttempt('save')}
-            disabled={isSaving || isSavingAndFinalizing || isSaleDateVisuallyInvalid || isPrivatentnahmeDateVisuallyInvalid || (isSold && isSalePriceInvalid)}
-            isLoading={isSaving}
-            leftIcon={<FaSave />}
-        >
-          {isSaving ? 'Speichert...' : 'Speichern'}
-        </Button>
-        {onSaveAndFinalize && (
-            <Button
-                onClick={() => handleAttempt('saveAndFinalize')}
-                disabled={isSaving || isSavingAndFinalizing || !canFinalize || isSaleDateVisuallyInvalid || isPrivatentnahmeDateVisuallyInvalid || (isSold && isSalePriceInvalid)}
-                isLoading={isSavingAndFinalizing}
-                leftIcon={<FaCheckCircle />}
-                title={!canFinalize ? finalizeDisabledTooltip : "Speichern und Beleg festschreiben"}
-            >
-            {isSavingAndFinalizing ? 'Wird festgeschr...' : 'Speichern & Festschreiben'}
-            </Button>
         )}
       </div>
     </Modal>
