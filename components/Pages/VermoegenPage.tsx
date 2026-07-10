@@ -1,7 +1,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '../../types';
-import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit } from 'react-icons/fa';
+import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit, FaCopy } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
 import Button from '../Common/Button';
 import CreateShopModal from '../Shop/CreateShopModal';
@@ -33,6 +33,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [locations, setLocations] = useState<StorageLocationEntry[]>([]);
   const [activeAuditLocation, setActiveAuditLocation] = useState<string | null>(null);
+  const [umlaufvermoegenCopied, setUmlaufvermoegenCopied] = useState(false);
 
   useEffect(() => {
     const loadLocations = async () => {
@@ -185,6 +186,25 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
   };
 
+  const copyUmlaufvermoegenTable = async () => {
+    const headers = ['ASIN', 'Name', 'Bestelldatum', 'ETV', 'Teilwert'];
+    const rows = umlaufvermoegen.map((product) => [
+      product.ASIN,
+      product.name.replace(/\s+/g, ' ').trim(),
+      formatDate(product.orderDateObj),
+      formatCurrency(product.etv),
+      hasTeilwert(product) ? formatCurrency(getCalculatedTeilwert(product)) : 'N/A',
+    ]);
+
+    try {
+      await navigator.clipboard.writeText([headers, ...rows].map((row) => row.join('\t')).join('\n'));
+      setUmlaufvermoegenCopied(true);
+      window.setTimeout(() => setUmlaufvermoegenCopied(false), 2000);
+    } catch {
+      alert('Die Tabelle konnte nicht in die Zwischenablage kopiert werden.');
+    }
+  };
+
   const handleNewExpenseChange = (field: keyof typeof newExpense, value: string) => {
     if (field === 'date') {
         const normalizedDate = normalizeGermanDateInput(value);
@@ -250,9 +270,23 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
     summaryType?: 'Umlaufvermögen' | 'Anlagenverzeichnis'
   ) => (
     <div className="p-6 bg-slate-800 rounded-lg shadow-xl border border-slate-700">
-      <h2 className="text-2xl font-semibold text-gray-100 mb-6 flex items-center">
-        {icon} {title} ({data.length})
-      </h2>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <h2 className="flex items-center text-2xl font-semibold text-gray-100">
+          {icon} {title} ({data.length})
+        </h2>
+        {summaryType === 'Umlaufvermögen' && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={copyUmlaufvermoegenTable}
+            disabled={data.length === 0}
+            leftIcon={<FaCopy />}
+            title="Umlaufvermögen als Tabelle kopieren"
+          >
+            {umlaufvermoegenCopied ? 'Kopiert' : 'Tabelle kopieren'}
+          </Button>
+        )}
+      </div>
       {data.length === 0 ? (
         <p className="text-gray-400 text-center py-8">Keine Produkte in dieser Kategorie.</p>
       ) : (
