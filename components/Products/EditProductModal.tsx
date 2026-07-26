@@ -396,7 +396,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
             <div>
               <label htmlFor="buyerAddress" className="block text-sm font-medium text-gray-300 mt-2">Käuferadresse (optional)</label>
-              <textarea id="buyerAddress" value={formData.buyerAddress} onChange={(e) => handleChange('buyerAddress', e.target.value)} rows={3} className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm" placeholder="Name&#10;Straße Hausnr.&#10;PLZ Ort"/>
+              <textarea id="buyerAddress" value={formData.buyerAddress} onChange={(e) => handleChange('buyerAddress', e.target.value)} rows={4} className="mt-1 block w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm text-gray-100 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm" placeholder="Name&#10;Straße Hausnr.&#10;PLZ Ort&#10;eBay-Bestellung 00-00000-00000"/>
             </div>
           </>
         )}

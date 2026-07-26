@@ -182,7 +182,7 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(getCalculatedTeilwert(p))}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{p.saleDate ? formatDate(p.saleDateObj) : 'N/A'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(p.salePrice)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-300 max-w-xs truncate" title={p.buyerAddress}>{p.buyerAddress || 'N/A'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-300 max-w-xs whitespace-pre-line break-words" title={p.buyerAddress}>{p.buyerAddress || 'N/A'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
                       <Button size="sm" variant="ghost" onClick={() => handleEditProduct(p)} title="Verkaufsdetails bearbeiten">
                          <FaEdit />

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Product, EuerSettings, ProductUsage, BelegSettings, UserAddressData, RecipientAddressData, AdditionalExpense } from './types';
 import { DEFAULT_EUER_SETTINGS, TAB_OPTIONS, DEFAULT_BELEG_SETTINGS, BELEG_SETTINGS_STORAGE_KEY, DEFAULT_API_BASE_URL, API_BASE_URL_STORAGE_KEY, ADDITIONAL_EXPENSES_STORAGE_KEY } from './constants';
 import Navbar from './components/Layout/Navbar';
@@ -9,7 +9,7 @@ import VermoegenPage from './components/Pages/VermoegenPage'; // Changed from In
 import SalesPage from './components/Pages/SalesPage';
 import SettingsPage from './components/Pages/SettingsPage';
 import BelegePage from './components/Pages/BelegePage';
-import { parseProductsFromFile } from './utils/fileParser';
+import { mergeParsedProduct, parseProductsFromFile } from './utils/fileParser';
 import { exportToJson, exportToXlsx } from './utils/dataExporter';
 import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData } from './utils/apiService';
 import { FaKey } from 'react-icons/fa';
@@ -17,6 +17,7 @@ import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtil
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
 import { generatePdfWithAppendedDocs } from './utils/pdfGenerator';
 import { isProductIgnoredByStreuartikel } from './utils/euerUtils';
+import { getNextProductWriteTimestamp } from './utils/productWriteUtils';
 
 
 const API_TOKEN_STORAGE_KEY = 'vineApp_apiToken';
@@ -60,6 +61,23 @@ const mergeServerAndLocalProduct = (serverProduct: Product, localProduct?: Produ
   return mergedProduct;
 };
 
+const sortProductsByOrderDate = (products: Product[]): Product[] =>
+  [...products].sort(
+    (a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0),
+  );
+
+type ProductLoadResult = {
+  products: Product[];
+  success: boolean;
+  message?: string;
+  invalidToken?: boolean;
+};
+
+type ProductSaveResult = {
+  success: boolean;
+  message?: string;
+};
+
 const App: React.FC = () => {
   const [apiToken, setApiToken] = useState<string | null>(() => localStorage.getItem(API_TOKEN_STORAGE_KEY));
   const [apiBaseUrl, setApiBaseUrlState] = useState<string>(() => localStorage.getItem(API_BASE_URL_STORAGE_KEY) || DEFAULT_API_BASE_URL);
@@ -93,13 +111,62 @@ const App: React.FC = () => {
       console.error("Failed to parse products from localStorage:", error);
       loadedProducts = [];
     }
-    // Apply filter based on the potentially updated initialEuerSettings
-    if (initialEuerSettings.ignoreETVZeroProducts) {
-      loadedProducts = loadedProducts.filter(p => p.etv !== 0);
-    }
-    // Note: Teilwert v2 application will happen after initial load and API fetch
     return loadedProducts;
   });
+  const productsRef = useRef<Product[]>(products);
+  const serverOperationTailRef = useRef<Promise<void>>(Promise.resolve());
+
+  const setCanonicalProducts = useCallback((update: React.SetStateAction<Product[]>) => {
+    const nextProducts = typeof update === 'function'
+      ? update(productsRef.current)
+      : update;
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+  }, []);
+
+  const runServerOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = serverOperationTailRef.current.then(operation, operation);
+    serverOperationTailRef.current = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }, []);
+
+  const filteredProducts = useMemo(
+    () => euerSettings.ignoreETVZeroProducts
+      ? products.filter(product => product.etv !== 0)
+      : products,
+    [products, euerSettings.ignoreETVZeroProducts],
+  );
+
+  const visibleProducts = useMemo(() => {
+    return filteredProducts.map(product => {
+      if (euerSettings.useTeilwertV2) {
+        return {
+          ...product,
+          teilwert: product.teilwert_v2 ?? product.teilwert,
+          pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${product.ASIN}.pdf`,
+        };
+      }
+
+      return {
+        ...product,
+        pdf: `https://hutauf.org/oracle2/files/PTWMETWS_${product.ASIN}.pdf`,
+      };
+    });
+  }, [filteredProducts, euerSettings.useTeilwertV2]);
+
+  const restoreCanonicalValuationFields = useCallback((product: Product): Product => {
+    const canonicalProduct = productsRef.current.find(candidate => candidate.ASIN === product.ASIN);
+    if (!canonicalProduct) return product;
+
+    return {
+      ...product,
+      teilwert: canonicalProduct.teilwert,
+      pdf: canonicalProduct.pdf,
+    };
+  }, []);
 
   const [belegSettings, setBelegSettingsState] = useState<BelegSettings>(() => {
     const stored = localStorage.getItem(BELEG_SETTINGS_STORAGE_KEY);
@@ -146,15 +213,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     try {
-      const productsToSave = euerSettings.ignoreETVZeroProducts 
-                             ? products.filter(p => p.etv !== 0) 
-                             : products;
-      localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(productsToSave));
+      localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
     } catch (error) {
       console.error("Failed to save products to localStorage:", error);
       setFeedbackMessage({ text: "Fehler beim Speichern der Produkte im lokalen Speicher. Möglicherweise ist der Speicher voll.", type: 'error' });
     }
-  }, [products, euerSettings.ignoreETVZeroProducts]);
+  }, [products]);
 
   useEffect(() => {
     localStorage.setItem(BELEG_SETTINGS_STORAGE_KEY, JSON.stringify(belegSettings));
@@ -187,155 +251,102 @@ const App: React.FC = () => {
   };
 
 
-  const loadProductData = useCallback(async (forceFilterApplication = false) => {
-    console.log('loadProductData called', { forceFilterApplication, hasToken: !!apiToken, useTeilwertV2: euerSettings.useTeilwertV2 });
-    if (!apiToken && !forceFilterApplication) { // if no token, only proceed if forcing filter
-      console.log('No API token and not forcing filter application. Abort loadProductData');
-      return;
-    }
-    if (!apiToken && forceFilterApplication) {
-        // Apply local filters if no token but filters changed
-        let currentProds = products;
-        if (euerSettings.ignoreETVZeroProducts) {
-            currentProds = currentProds.filter(p => p.etv !== 0);
-        }
-        // Teilwert V2 cannot be applied without API token
-        setProducts(currentProds);
-        console.log('Applied local filters without API token', { productCount: currentProds.length });
-        return;
+  const fetchMergedProductData = useCallback(async (localProducts: Product[]): Promise<ProductLoadResult> => {
+    if (!apiToken) {
+      return { products: localProducts, success: false, message: 'Kein API Token konfiguriert.' };
     }
 
-
-    setIsLoading(true);
-    setFeedbackMessage(null);
-    const serverResponse = await apiGetAllProducts(apiBaseUrl, apiToken!); // Token is checked
-    console.log('apiGetAllProducts response', serverResponse);
-    
-    let processedProducts: Product[] = [];
-
-    if (serverResponse.status === 'success' && serverResponse.data) {
-      console.log('Loaded products from server', serverResponse.data.length);
-      let serverProducts = serverResponse.data;
-      const localProductsMap = new Map(products.map(p => [p.ASIN, p]));
-      const mergedProductsMap = new Map<string, Product>();
-
-      serverProducts.forEach(serverP => {
-        const localP = localProductsMap.get(serverP.ASIN);
-        mergedProductsMap.set(serverP.ASIN, mergeServerAndLocalProduct(serverP, localP));
-      });
-
-      localProductsMap.forEach((localP, asin) => {
-        if (!mergedProductsMap.has(asin)) {
-          mergedProductsMap.set(asin, localP);
-        }
-      });
-
-      processedProducts = Array.from(mergedProductsMap.values());
-      // Initial success message before V2 data, if any
-      setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen (${processedProducts.length}). Verarbeite Teilwert V2...`, type: 'info' });
-
-    } else {
-      processedProducts = [...products]; // Use local data on error
-      const fullErrorMessage = `Fehler beim Laden der Produkte vom Server: ${serverResponse.message || 'Unbekannter Fehler.'} Lokale Daten werden beibehalten.`;
-      console.warn('Server product load failed', serverResponse);
-      setFeedbackMessage({ text: fullErrorMessage, type: 'error' });
-      
-      if (serverResponse.message && serverResponse.message.toLowerCase().includes('failed to fetch')) {
-        console.error("Detailed 'Failed to fetch' error", serverResponse);
-      }
-      if (serverResponse.message?.toLowerCase().includes("invalid token")) {
-        setApiToken(null); 
-        setFeedbackMessage({ text: "Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.", type: 'error' });
-      }
+    const serverResponse = await apiGetAllProducts(apiBaseUrl, apiToken);
+    if (serverResponse.status !== 'success' || !serverResponse.data) {
+      const message = serverResponse.message || 'Unbekannter Fehler.';
+      return {
+        products: localProducts,
+        success: false,
+        message,
+        invalidToken: message.toLowerCase().includes('invalid token'),
+      };
     }
 
-    // Apply Teilwert V2 data if setting is active
-    processedProducts = processedProducts.map(p => {
-      if (euerSettings.useTeilwertV2) {
-        return {
-          ...p,
-          teilwert: p.teilwert_v2 ?? p.teilwert,
-          pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${p.ASIN}.pdf`,
-        };
-      } else {
-        return {
-          ...p,
-          pdf: `https://hutauf.org/oracle2/files/PTWMETWS_${p.ASIN}.pdf`,
-        };
+    const localProductsMap = new Map(localProducts.map(product => [product.ASIN, product]));
+    const mergedProductsMap = new Map<string, Product>();
+
+    serverResponse.data.forEach(serverProduct => {
+      const localProduct = localProductsMap.get(serverProduct.ASIN);
+      mergedProductsMap.set(
+        serverProduct.ASIN,
+        mergeServerAndLocalProduct(serverProduct, localProduct),
+      );
+    });
+
+    localProductsMap.forEach((localProduct, asin) => {
+      if (!mergedProductsMap.has(asin)) {
+        mergedProductsMap.set(asin, localProduct);
       }
     });
-    
-    // Apply ignoreETVZeroProducts filter
-    if (euerSettings.ignoreETVZeroProducts) {
-      processedProducts = processedProducts.filter(p => p.etv !== 0);
-    }
 
-    const sortedFinalProducts = processedProducts.sort((a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0));
-    setProducts(sortedFinalProducts);
-    console.log('Final products after load', sortedFinalProducts.map(p => ({ ASIN: p.ASIN, teilwert: p.teilwert, pdf: p.pdf })));
-    
-    if (serverResponse.status === 'success' && !euerSettings.useTeilwertV2) { // If V2 wasn't even attempted.
-        setFeedbackMessage({ text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${sortedFinalProducts.length} Produkte).`, type: 'success' });
-    }
-    
-    setIsLoading(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiToken, apiBaseUrl, euerSettings.ignoreETVZeroProducts, euerSettings.useTeilwertV2]); // products removed to avoid loop with its own update
+    return {
+      products: sortProductsByOrderDate(Array.from(mergedProductsMap.values())),
+      success: true,
+    };
+  }, [apiBaseUrl, apiToken]);
+
+  const loadProductData = useCallback(async (): Promise<Product[]> => {
+    if (!apiToken) return productsRef.current;
+
+    return runServerOperation(async () => {
+      setIsLoading(true);
+      setFeedbackMessage(null);
+      try {
+        const result = await fetchMergedProductData(productsRef.current);
+        if (result.success) {
+          setCanonicalProducts(result.products);
+          setFeedbackMessage({
+            text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${result.products.length} Produkte).`,
+            type: 'success',
+          });
+        } else if (result.invalidToken) {
+          setApiToken(null);
+          setFeedbackMessage({
+            text: 'Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.',
+            type: 'error',
+          });
+        } else {
+          setFeedbackMessage({
+            text: `Fehler beim Laden der Produkte vom Server: ${result.message} Lokale Daten werden beibehalten.`,
+            type: 'error',
+          });
+        }
+        return result.products;
+      } finally {
+        setIsLoading(false);
+      }
+    });
+  }, [apiToken, fetchMergedProductData, runServerOperation, setCanonicalProducts]);
 
 
   const setEuerSettings = (newSettings: EuerSettings | ((prevState: EuerSettings) => EuerSettings)) => {
-    const oldSettings = euerSettings;
-    console.log('setEuerSettings called', { oldUseV2: oldSettings.useTeilwertV2, newSettings });
     setEuerSettingsState(prevSettings => {
         const updatedSettings = typeof newSettings === 'function' ? newSettings(prevSettings) : newSettings;
         
-        let needsReload = false;
-        if (updatedSettings.ignoreETVZeroProducts !== oldSettings.ignoreETVZeroProducts) {
-            needsReload = true;
+        if (updatedSettings.ignoreETVZeroProducts !== prevSettings.ignoreETVZeroProducts) {
             if (updatedSettings.ignoreETVZeroProducts) {
                 setFeedbackMessage({ text: "Produkte mit ETV=0 werden lokal ausgeblendet.", type: 'info' });
             } else {
                  setFeedbackMessage({ text: "Filter für ETV=0 Produkte deaktiviert.", type: 'info' });
             }
         }
-        if (updatedSettings.useTeilwertV2 !== oldSettings.useTeilwertV2) {
-            needsReload = true;
-            console.log('useTeilwertV2 changed', { from: oldSettings.useTeilwertV2, to: updatedSettings.useTeilwertV2 });
-            setFeedbackMessage({ text: `Teilwert V2 Daten ${updatedSettings.useTeilwertV2 ? 'aktiviert' : 'deaktiviert'}. Lade Daten neu...`, type: 'info' });
-        }
-
-        if (needsReload) {
-            // Directly call loadProductData with forceFilterApplication true
-            // This is tricky because loadProductData itself uses 'euerSettings' from state.
-            // The state update is async. For an immediate effect based on *updatedSettings*:
-            if (apiToken) {
-                 // Trigger reload by changing a dependency of the useEffect that calls loadProductData,
-                 // or by calling it directly after a timeout to let state update.
-                 // For now, will rely on the useEffect down below.
-            } else {
-                 // If no API token, apply filters locally for ignoreETVZero. Teilwert V2 needs API.
-                 if (updatedSettings.ignoreETVZeroProducts && !oldSettings.ignoreETVZeroProducts) {
-                    setProducts(prevProducts => prevProducts.filter(p => p.etv !== 0));
-                 }
-                 // If useTeilwertV2 changes without API token, we can't fetch V2, so V1 remains or becomes null if V2 was on.
-                 // This local-only update for V2 source is complex without refetching.
-                 // The loadProductData will handle this on next apiToken-driven call.
-            }
+        if (updatedSettings.useTeilwertV2 !== prevSettings.useTeilwertV2) {
+            setFeedbackMessage({ text: `Teilwert V2 Daten ${updatedSettings.useTeilwertV2 ? 'aktiviert' : 'deaktiviert'}.`, type: 'info' });
         }
         return updatedSettings;
     });
   };
 
   useEffect(() => {
-    console.log('useEffect reload triggered', { hasToken: !!apiToken, useTeilwertV2: euerSettings.useTeilwertV2, ignoreETVZero: euerSettings.ignoreETVZeroProducts });
-    if (apiToken) { // Load data if token exists (initial or after change) or if settings that require reload change
+    if (apiToken) {
         loadProductData();
-    } else {
-        // If API token is removed, we might want to clear products or apply filters to existing local products
-        // For now, local products persist. Filter application happens on setting change.
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps 
-  }, [apiToken, apiBaseUrl, euerSettings.useTeilwertV2, euerSettings.ignoreETVZeroProducts]); // Added settings that trigger reload
+  }, [apiToken, apiBaseUrl, loadProductData]);
 
   useEffect(() => {
     localStorage.setItem(EUER_SETTINGS_STORAGE_KEY, JSON.stringify(euerSettings));
@@ -369,7 +380,9 @@ const App: React.FC = () => {
       return;
     }
     setIsLoading(true);
-    const response = await apiDeleteAllData(apiBaseUrl, apiToken);
+    const response = await runServerOperation(
+      () => apiDeleteAllData(apiBaseUrl, apiToken),
+    );
     if (response.status === 'success') {
       setFeedbackMessage({ text: response.message || "Alle Produktdaten auf dem Server gelöscht.", type: 'success' });
     } else {
@@ -380,7 +393,7 @@ const App: React.FC = () => {
 
   const handleClearLocalDataAndToken = () => {
     setApiToken(null); 
-    setProducts([]);
+    setCanonicalProducts([]);
     setAdditionalExpenses([]); 
     setFeedbackMessage({ text: "Lokale Produktdaten, Ausgaben und API Token entfernt.", type: 'success' });
   };
@@ -389,7 +402,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     setFeedbackMessage(null);
     try {
-      let parsedProductsFromFile = await parseProductsFromFile(file);
+      const parsedProductsFromFile = await parseProductsFromFile(file);
       // ETV=0 filter is applied in loadProductData after potential merge
       // Teilwert V2 is also applied in loadProductData
 
@@ -400,19 +413,28 @@ const App: React.FC = () => {
       }
       
       const productsToActuallyProcess: Product[] = [];
-      const currentProductsMap = new Map(products.map(p => [p.ASIN, p]));
+      const currentProductsMap = new Map(productsRef.current.map(p => [p.ASIN, p]));
       let skippedCount = 0;
+      const importTimestamp = Math.floor(Date.now() / 1000);
 
-      for (const pFromFile of parsedProductsFromFile) {
+      for (const parsedProduct of parsedProductsFromFile) {
+        const pFromFile = parsedProduct.product;
         const existingProduct = currentProductsMap.get(pFromFile.ASIN);
-        const fileTimestamp = pFromFile.last_update_time || 0; 
-        const existingTimestamp = existingProduct?.last_update_time || 0;
+        const hasFileTimestamp = typeof pFromFile.last_update_time === 'number'
+          && Number.isFinite(pFromFile.last_update_time);
+        const fileTimestamp = hasFileTimestamp ? pFromFile.last_update_time! : 0;
+        const existingTimestamp = existingProduct?.last_update_time ?? 0;
 
-        if (!existingProduct || fileTimestamp >= existingTimestamp) {
-          productsToActuallyProcess.push({
-            ...pFromFile,
-            last_update_time: Math.floor(Date.now() / 1000) 
-          });
+        if (!existingProduct || !hasFileTimestamp || fileTimestamp >= existingTimestamp) {
+          const productToImport: Product = {
+            ...mergeParsedProduct(existingProduct, parsedProduct),
+            last_update_time: getNextProductWriteTimestamp(
+              Math.max(existingTimestamp, fileTimestamp),
+              importTimestamp,
+            ),
+          };
+          productsToActuallyProcess.push(productToImport);
+          currentProductsMap.set(productToImport.ASIN, productToImport);
         } else {
           skippedCount++;
         }
@@ -424,32 +446,36 @@ const App: React.FC = () => {
         return;
       }
 
+      const mergedLocalProducts = sortProductsByOrderDate(Array.from(currentProductsMap.values()));
+      setCanonicalProducts(mergedLocalProducts);
+
       if (!apiToken) {
-        // Merge locally, then loadProductData will apply V2 and ETV filters if settings active
-        const productsMap = new Map(products.map(p => [p.ASIN, p]));
-        productsToActuallyProcess.forEach(p => productsMap.set(p.ASIN, p));
-        let newProductArray = Array.from(productsMap.values());
-        
-        // Apply filters directly for local update if no API token for loadProductData to do it
-        if (euerSettings.ignoreETVZeroProducts) {
-            newProductArray = newProductArray.filter(p => p.etv !== 0);
-        }
-        // Teilwert V2 cannot be applied here without an API call. It will be applied on next API-driven load.
-        
-        setProducts(newProductArray.sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0)));
-        setFeedbackMessage({ text: `Lokal importiert/aktualisiert (${productsToActuallyProcess.length} verarbeitet, ${skippedCount} ältere übersprungen). ETV=0 Filter ${euerSettings.ignoreETVZeroProducts ? 'aktiv' : 'inaktiv'}. Teilwert V2 ${euerSettings.useTeilwertV2 ? 'aktiv (wird bei nächstem Sync geladen)' : 'inaktiv'}.`, type: 'info' });
+        setFeedbackMessage({
+          text: `Lokal importiert/aktualisiert (${productsToActuallyProcess.length} verarbeitet, ${skippedCount} ältere übersprungen). ETV=0 Filter ${euerSettings.ignoreETVZeroProducts ? 'aktiv' : 'inaktiv'}. Teilwert V2 ${euerSettings.useTeilwertV2 ? 'aktiv' : 'inaktiv'}.`,
+          type: 'info',
+        });
       } else {
-        const response = await apiUpdateProducts(apiBaseUrl, apiToken, productsToActuallyProcess);
-        if (response.status === 'success') {
+        await runServerOperation(async () => {
+          setIsLoading(true);
+          const response = await apiUpdateProducts(apiBaseUrl, apiToken, productsToActuallyProcess);
+          if (response.status !== 'success') {
+            setFeedbackMessage({
+              text: `Fehler beim Server-Upload: ${response.message || 'Unbekannter Fehler.'} Der Import bleibt lokal gespeichert.`,
+              type: 'error',
+            });
+            return;
+          }
+
           const { inserted = 0, updated = 0, skipped: apiSkipped = 0 } = response;
+          const refreshed = await fetchMergedProductData(productsRef.current);
+          if (refreshed.success) {
+            setCanonicalProducts(refreshed.products);
+          }
           setFeedbackMessage({
-            text: `Upload: ${inserted} neu, ${updated} aktualisiert, ${apiSkipped} serverseitig / ${skippedCount} clientseitig übersprungen. Sync...`,
-            type: 'success'
+            text: `Upload: ${inserted} neu, ${updated} aktualisiert, ${apiSkipped} serverseitig / ${skippedCount} clientseitig übersprungen.`,
+            type: refreshed.success ? 'success' : 'info',
           });
-          await loadProductData(); 
-        } else {
-          setFeedbackMessage({ text: `Fehler beim Server-Upload: ${response.message || 'Unbekannter Fehler.'}`, type: 'error' });
-        }
+        });
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Fehler bei Dateiverarbeitung.";
@@ -459,57 +485,80 @@ const App: React.FC = () => {
     }
   };
   
-  const handleSaveProductDetails = async (updatedProduct: Product): Promise<void> => {
-    const productWithTimestamp = {
-        ...updatedProduct,
-        last_update_time: Math.floor(Date.now() / 1000) 
+  const saveProductDetails = async (updatedProduct: Product): Promise<ProductSaveResult> => {
+    const previousProduct = productsRef.current.find(product => product.ASIN === updatedProduct.ASIN);
+    const productWithTimestamp: Product = {
+        ...restoreCanonicalValuationFields(updatedProduct),
+        last_update_time: getNextProductWriteTimestamp(
+          previousProduct?.last_update_time ?? updatedProduct.last_update_time,
+        ),
     };
 
-    // Apply ETV=0 filter locally immediately
-    if (euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0) {
-      setProducts(prevProducts => prevProducts.filter(p => p.ASIN !== productWithTimestamp.ASIN));
-      setFeedbackMessage({text: `Produkt ${productWithTimestamp.ASIN} hat ETV=0, lokal ausgeblendet (Filter aktiv). Änderung wird gespeichert.`, type: 'info'});
-    } else {
-        setProducts(prevProducts => 
-        prevProducts.map(p => 
+    setCanonicalProducts(prevProducts =>
+        sortProductsByOrderDate(prevProducts.map(p =>
             p.ASIN === productWithTimestamp.ASIN 
             ? productWithTimestamp
             : p
-        ).sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0))
-        );
-    }
-    // Note: Teilwert V2 is primarily applied on load. If a user edits a product,
-    // the `teilwert` field they edit is what's saved. If `useTeilwertV2` is on,
-    // the next `loadProductData` would re-apply V2 data if available from server.
+        )),
+    );
 
     if (!apiToken) {
-      if (!(euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0)) {
-         setFeedbackMessage({text: `Produkt ${productWithTimestamp.ASIN} lokal aktualisiert.`, type: 'info'});
-      }
-      return; 
+      const hiddenByFilter = euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0;
+      setFeedbackMessage({
+        text: hiddenByFilter
+          ? `Produkt ${productWithTimestamp.ASIN} lokal aktualisiert und durch den aktiven ETV=0 Filter ausgeblendet.`
+          : `Produkt ${productWithTimestamp.ASIN} lokal aktualisiert.`,
+        type: 'info',
+      });
+      return { success: true };
     }
 
     setIsLoading(true);
-    const response = await apiUpdateSingleProduct(apiBaseUrl, apiToken, productWithTimestamp);
-    if (response.status === 'success') {
-      setFeedbackMessage({text: `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert.`, type: 'success'});
-      // Potentially reload this single product or all to reflect V2 if setting is on
-      await loadProductData(); 
-    } else {
-      setFeedbackMessage({ text: `Server-Aktualisierungsfehler für ${productWithTimestamp.ASIN}: ${response.message || 'Unbekannt.'} Lokale Änderung bleibt.`, type: 'error' });
+    try {
+      return await runServerOperation(async (): Promise<ProductSaveResult> => {
+        setIsLoading(true);
+        const response = await apiUpdateSingleProduct(apiBaseUrl, apiToken, productWithTimestamp);
+        if (response.status !== 'success') {
+          const message = `Server-Aktualisierungsfehler für ${productWithTimestamp.ASIN}: ${response.message || 'Unbekannt.'} Lokale Änderung bleibt.`;
+          setFeedbackMessage({ text: message, type: 'error' });
+          return { success: false, message };
+        }
+        if ((response.skipped ?? 0) > 0) {
+          const refreshed = await fetchMergedProductData(productsRef.current);
+          if (refreshed.success) {
+            setCanonicalProducts(refreshed.products);
+          }
+          const message = `Server hat die Aktualisierung für ${productWithTimestamp.ASIN} als veraltet übersprungen.`;
+          setFeedbackMessage({ text: message, type: 'error' });
+          return { success: false, message };
+        }
+
+        const refreshed = await fetchMergedProductData(productsRef.current);
+        if (refreshed.success) {
+          setCanonicalProducts(refreshed.products);
+        }
+        setFeedbackMessage({
+          text: refreshed.success
+            ? `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert.`
+            : `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert; anschließendes Neuladen fehlgeschlagen.`,
+          type: refreshed.success ? 'success' : 'info',
+        });
+        return { success: true };
+      });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-    // Final filter application after potential server interaction
-    if (euerSettings.ignoreETVZeroProducts && productWithTimestamp.etv === 0) {
-        setProducts(prev => prev.filter(p => p.etv !== 0));
-    }
+  };
+
+  const handleSaveProductDetails = async (updatedProduct: Product): Promise<void> => {
+    await saveProductDetails(updatedProduct);
   };
 
   const proposedInvoiceNumbers = useMemo(() => {
     const newProposedNumbers = new Map<string, string>();
     const productsByYear: { [year: string]: Product[] } = {};
 
-    products.forEach(p => {
+    visibleProducts.forEach(p => {
       const orderDate = parseDMYtoDate(p.date);
       if (orderDate) {
         const year = orderDate.getFullYear().toString();
@@ -550,7 +599,7 @@ const App: React.FC = () => {
       });
     }
     return newProposedNumbers;
-  }, [products, euerSettings.streuArtikelLimitActive, euerSettings.streuArtikelLimitValue]);
+  }, [visibleProducts, euerSettings.streuArtikelLimitActive, euerSettings.streuArtikelLimitValue]);
 
 
   const executeFestschreiben = async (
@@ -575,16 +624,26 @@ const App: React.FC = () => {
       return { success: false, message: "Fehler: Rechnungsnummer für Festschreibung nicht gefunden oder noch nicht ermittelt." };
     }
     
-    const finalizedProductData: Product = {
+    const previousProduct = productsRef.current.find(product => product.ASIN === productToFinalize.ASIN);
+    const finalizedTimestamp = getNextProductWriteTimestamp(
+      previousProduct?.last_update_time ?? productToFinalize.last_update_time,
+    );
+    const finalizedProductForDocument: Product = {
       ...productToFinalize,
       festgeschrieben: 1,
       rechnungsNummer: invoiceNumberToAssign,
-      last_update_time: Math.floor(Date.now() / 1000)
+      last_update_time: finalizedTimestamp,
+    };
+    const finalizedProductData: Product = {
+      ...restoreCanonicalValuationFields(productToFinalize),
+      festgeschrieben: 1,
+      rechnungsNummer: invoiceNumberToAssign,
+      last_update_time: finalizedProductForDocument.last_update_time,
     };
 
     setIsLoading(true); 
     try {
-        const belegTextForPdf = generateBelegTextForPdf(finalizedProductData, belegSettings, euerSettings, invoiceNumberToAssign);
+        const belegTextForPdf = generateBelegTextForPdf(finalizedProductForDocument, belegSettings, euerSettings, invoiceNumberToAssign);
         if (belegTextForPdf.startsWith("Fehler:") || belegTextForPdf.startsWith("Streuartikel:")) {
             throw new Error(belegTextForPdf);
         }
@@ -592,19 +651,25 @@ const App: React.FC = () => {
         await generatePdfWithAppendedDocs(
             belegTextForPdf, 
             `${invoiceNumberToAssign}.pdf`,
-            attachExtPdf && finalizedProductData.pdf ? [finalizedProductData.pdf] : [],
+            attachExtPdf && finalizedProductForDocument.pdf ? [finalizedProductForDocument.pdf] : [],
             false 
         );
         
-        setProducts(prev => 
-            prev.map(p => p.ASIN === finalizedProductData.ASIN ? finalizedProductData : p)
-                .sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0))
+        setCanonicalProducts(prev =>
+            sortProductsByOrderDate(
+              prev.map(p => p.ASIN === finalizedProductData.ASIN ? finalizedProductData : p),
+            )
         );
 
         if (apiToken) {
-            const response = await apiUpdateSingleProduct(apiBaseUrl, apiToken, finalizedProductData);
+            const response = await runServerOperation(
+              () => apiUpdateSingleProduct(apiBaseUrl, apiToken, finalizedProductData),
+            );
             if (response.status !== 'success') {
                 throw new Error(`Server-Update fehlgeschlagen: ${response.message || 'Unbekannt'}`);
+            }
+            if ((response.skipped ?? 0) > 0) {
+                throw new Error(`Server hat die Festschreibung für ${finalizedProductData.ASIN} als veraltet übersprungen.`);
             }
         }
         setIsLoading(false);
@@ -622,10 +687,25 @@ const App: React.FC = () => {
     productToSaveAndFinalize: Product,
     attachExtPdf: boolean
   ): Promise<{success: boolean; message: string}> => {
-    // Save first, which might update the product in state, including its `pdf` link if V2 is active
-    await handleSaveProductDetails(productToSaveAndFinalize); 
-    // Find the latest version from state, as handleSaveProductDetails updates it and might trigger re-sort or filter
-    const potentiallyUpdatedProduct = products.find(p => p.ASIN === productToSaveAndFinalize.ASIN) || productToSaveAndFinalize;
+    const saveResult = await saveProductDetails(productToSaveAndFinalize);
+    if (!saveResult.success) {
+      const message = `${saveResult.message || 'Produkt konnte nicht gespeichert werden.'} Festschreibung wurde nicht gestartet.`;
+      setFeedbackMessage({ text: message, type: 'error' });
+      return { success: false, message };
+    }
+    const canonicalProduct = productsRef.current.find(
+      p => p.ASIN === productToSaveAndFinalize.ASIN,
+    ) || restoreCanonicalValuationFields(productToSaveAndFinalize);
+    const potentiallyUpdatedProduct = euerSettings.useTeilwertV2
+      ? {
+          ...canonicalProduct,
+          teilwert: canonicalProduct.teilwert_v2 ?? canonicalProduct.teilwert,
+          pdf: `https://hutauf.org/oracle2/files/Teilwert_v2_${canonicalProduct.ASIN}.pdf`,
+        }
+      : {
+          ...canonicalProduct,
+          pdf: `https://hutauf.org/oracle2/files/PTWMETWS_${canonicalProduct.ASIN}.pdf`,
+        };
     
     const festschreibenResult = await executeFestschreiben(potentiallyUpdatedProduct, attachExtPdf);
     setFeedbackMessage({ text: festschreibenResult.message, type: festschreibenResult.success ? 'success' : 'error'});
@@ -639,33 +719,64 @@ const App: React.FC = () => {
     }
     setIsLoading(true);
     setFeedbackMessage({ text: "Starte vollständige Synchronisation...", type: 'info' });
-    
-    // loadProductData handles fetching, merging with local, applying V2, and ETV filters
-    await loadProductData(); 
 
-    // After loadProductData, `products` state contains the merged and processed data.
-    // Now, upload this comprehensive list to the server.
-    if (products.length > 0) {
-        const productsWithTimestamps = products.map(p => ({
-            ...p, 
-            last_update_time: p.last_update_time || Math.floor(Date.now() / 1000)
+    try {
+      await runServerOperation(async () => {
+        setIsLoading(true);
+        const pulled = await fetchMergedProductData(productsRef.current);
+        if (!pulled.success) {
+          if (pulled.invalidToken) setApiToken(null);
+          setFeedbackMessage({
+            text: `Vollständige Synchronisation abgebrochen: Serverdaten konnten nicht geladen werden (${pulled.message || 'unbekannter Fehler'}). Es wurde nichts hochgeladen.`,
+            type: 'error',
+          });
+          return;
+        }
+
+        setCanonicalProducts(pulled.products);
+        if (pulled.products.length === 0) {
+          setFeedbackMessage({
+            text: 'Vollständige Synchronisation abgeschlossen. Keine Produkte vorhanden.',
+            type: 'success',
+          });
+          return;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const productsWithTimestamps = pulled.products.map(product => ({
+          ...product,
+          last_update_time: product.last_update_time || now,
         }));
 
-        setFeedbackMessage({ text: `Lokale Daten gemischt (${productsWithTimestamps.length}). Lade auf Server hoch...`, type: 'info' });
+        setFeedbackMessage({
+          text: `Lokale und Serverdaten gemischt (${productsWithTimestamps.length}). Lade auf Server hoch...`,
+          type: 'info',
+        });
         const uploadResponse = await apiUpdateProducts(apiBaseUrl, apiToken, productsWithTimestamps);
-        if (uploadResponse.status === 'success') {
-            const { inserted = 0, updated = 0, skipped = 0 } = uploadResponse;
-            setFeedbackMessage({ text: `Vollständige Synchronisation erfolgreich! Server: ${inserted} neu, ${updated} aktual., ${skipped} überspr. Lade erneut...`, type: 'success' });
-            await loadProductData(); // Final load to ensure consistency
-        } else {
-            setFeedbackMessage({ text: `Fehler beim Hochladen der gemischten Daten: ${uploadResponse.message || 'Unbekannter Fehler.'}`, type: 'error' });
+        if (uploadResponse.status !== 'success') {
+          setFeedbackMessage({
+            text: `Fehler beim Hochladen der gemischten Daten: ${uploadResponse.message || 'Unbekannter Fehler.'}`,
+            type: 'error',
+          });
+          return;
         }
-    } else {
-         setFeedbackMessage({ text: `Vollständige Synchronisation abgeschlossen. Keine lokalen Produkte zum Hochladen.`, type: 'success' });
-         // Still call loadProductData to ensure clean state if local was empty but server has data
-         await loadProductData();
+
+        const verified = await fetchMergedProductData(productsWithTimestamps);
+        if (verified.success) {
+          setCanonicalProducts(verified.products);
+        }
+
+        const { inserted = 0, updated = 0, skipped = 0 } = uploadResponse;
+        setFeedbackMessage({
+          text: verified.success
+            ? `Vollständige Synchronisation erfolgreich! Server: ${inserted} neu, ${updated} aktual., ${skipped} überspr.`
+            : `Upload erfolgreich (Server: ${inserted} neu, ${updated} aktual., ${skipped} überspr.), abschließende Prüfung fehlgeschlagen.`,
+          type: verified.success ? 'success' : 'info',
+        });
+      });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
 
@@ -687,21 +798,24 @@ const App: React.FC = () => {
 
     setIsLoading(true);
     const productsToUpdate: Product[] = [];
-    const updatedProductASINs = new Set<string>();
+    const writeTimestamp = Math.floor(Date.now() / 1000);
 
-    products.forEach(p => {
+    visibleProducts.forEach(p => {
       const orderDate = parseDMYtoDate(p.date);
       if (orderDate && orderDate < thresholdDate && p.festgeschrieben !== 1) {
         if (isProductIgnoredByStreuartikel(p, euerSettings)) {
             return; 
         }
+        const previousProduct = productsRef.current.find(product => product.ASIN === p.ASIN);
         productsToUpdate.push({
-          ...p,
+          ...restoreCanonicalValuationFields(p),
           festgeschrieben: 1,
           rechnungsNummer: p.rechnungsNummer, 
-          last_update_time: Math.floor(Date.now() / 1000)
+          last_update_time: getNextProductWriteTimestamp(
+            previousProduct?.last_update_time ?? p.last_update_time,
+            writeTimestamp,
+          ),
         });
-        updatedProductASINs.add(p.ASIN);
       }
     });
 
@@ -711,24 +825,24 @@ const App: React.FC = () => {
       return;
     }
 
-    setProducts(prevProducts =>
-      prevProducts.map(p => {
-        if (updatedProductASINs.has(p.ASIN)) {
-          const updatedP: Product = { 
-            ...p, 
-            festgeschrieben: 1, 
-            last_update_time: Math.floor(Date.now() / 1000) 
-          };
-          return updatedP;
-        }
-        return p;
-      }).sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0))
+    const updatesByAsin = new Map(productsToUpdate.map(product => [product.ASIN, product]));
+    setCanonicalProducts(prevProducts =>
+      sortProductsByOrderDate(
+        prevProducts.map(product => updatesByAsin.get(product.ASIN) ?? product),
+      )
     );
 
     if (apiToken) {
-      const response = await apiUpdateProducts(apiBaseUrl, apiToken, productsToUpdate);
-      if (response.status === 'success') {
+      const response = await runServerOperation(
+        () => apiUpdateProducts(apiBaseUrl, apiToken, productsToUpdate),
+      );
+      if (response.status === 'success' && (response.skipped ?? 0) === 0) {
         setFeedbackMessage({ text: `${productsToUpdate.length} Produkte serverseitig festgeschrieben.`, type: 'success' });
+      } else if (response.status === 'success') {
+        setFeedbackMessage({
+          text: `Massen-Festschreibung nur teilweise synchronisiert: ${response.skipped} Server-Updates wurden als veraltet übersprungen.`,
+          type: 'error',
+        });
       } else {
         setFeedbackMessage({ text: `Serverfehler bei Massen-Festschreibung: ${response.message || 'Unbekannt.'}`, type: 'error' });
       }
@@ -776,25 +890,38 @@ const App: React.FC = () => {
       );
 
       const nowTimestamp = Math.floor(Date.now() / 1000);
-      const updatedProductsInBulk: Product[] = selectedProductsForBulk.map(p => ({
-        ...p,
-        festgeschrieben: 1,
-        rechnungsNummer: invoiceNumberForBulk, 
-        last_update_time: nowTimestamp,
-      }));
+      const updatedProductsInBulk: Product[] = selectedProductsForBulk.map(p => {
+        const previousProduct = productsRef.current.find(product => product.ASIN === p.ASIN);
+        return {
+          ...restoreCanonicalValuationFields(p),
+          festgeschrieben: 1,
+          rechnungsNummer: invoiceNumberForBulk,
+          last_update_time: getNextProductWriteTimestamp(
+            previousProduct?.last_update_time ?? p.last_update_time,
+            nowTimestamp,
+          ),
+        };
+      });
 
       const updatedProductASINs = new Set(updatedProductsInBulk.map(p => p.ASIN));
-      setProducts(prev =>
-        prev.map(p => updatedProductASINs.has(p.ASIN)
-            ? updatedProductsInBulk.find(up => up.ASIN === p.ASIN)! 
-            : p
-        ).sort((a,b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0))
+      setCanonicalProducts(prev =>
+        sortProductsByOrderDate(
+          prev.map(p => updatedProductASINs.has(p.ASIN)
+              ? updatedProductsInBulk.find(up => up.ASIN === p.ASIN)!
+              : p
+          ),
+        )
       );
 
       if (apiToken) {
-        const response = await apiUpdateProducts(apiBaseUrl, apiToken, updatedProductsInBulk);
+        const response = await runServerOperation(
+          () => apiUpdateProducts(apiBaseUrl, apiToken, updatedProductsInBulk),
+        );
         if (response.status !== 'success') {
           throw new Error(`Server-Update für Sammelbeleg fehlgeschlagen: ${response.message || 'Unbekannt'}`);
+        }
+        if ((response.skipped ?? 0) > 0) {
+          throw new Error(`${response.skipped} Server-Updates für den Sammelbeleg wurden als veraltet übersprungen.`);
         }
       }
       setIsLoading(false);
@@ -809,12 +936,12 @@ const App: React.FC = () => {
 
 
   const handleExportJson = () => {
-    exportToJson(products, `vine_products_export_${new Date().toISOString().split('T')[0]}.json`);
+    exportToJson(visibleProducts, `vine_products_export_${new Date().toISOString().split('T')[0]}.json`);
     setFeedbackMessage({text: "Produktdaten als JSON exportiert.", type: 'success'});
   };
 
   const handleExportXlsx = () => {
-    exportToXlsx(products, `vine_products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+    exportToXlsx(visibleProducts, `vine_products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
     setFeedbackMessage({text: "Produktdaten als XLSX exportiert.", type: 'success'});
   };
 
@@ -838,7 +965,7 @@ const App: React.FC = () => {
         
         {activeTab === TAB_OPTIONS.DASHBOARD && (
           <>
-            {!apiToken && products.length === 0 && !isLoading && (
+            {!apiToken && visibleProducts.length === 0 && !isLoading && (
                  <div className="p-6 bg-slate-800 rounded-lg shadow-md border border-slate-700 text-center mb-6">
                     <FaKey size={32} className="mx-auto text-yellow-400 mb-3" />
                     <h3 className="text-lg font-semibold text-gray-100 mb-1">API Token für Server-Synchronisation</h3>
@@ -856,7 +983,7 @@ const App: React.FC = () => {
                 </div>
             )}
             <DashboardPage 
-                products={products} 
+                products={visibleProducts}
                 onUpdateProduct={handleSaveProductDetails} 
                 onSaveAndFinalizeProduct={handleSaveAndFinalizeProduct} 
                 onFileUpload={handleFileUpload} 
@@ -869,7 +996,7 @@ const App: React.FC = () => {
         )}
         {activeTab === TAB_OPTIONS.EUER && (
           <EuerPage 
-            products={products} 
+            products={visibleProducts}
             settings={euerSettings} 
             onSettingsChange={setEuerSettings} 
             additionalExpenses={additionalExpenses}
@@ -881,7 +1008,7 @@ const App: React.FC = () => {
         )}
         {activeTab === TAB_OPTIONS.VERMOEGEN && (
           <VermoegenPage
-            products={products}
+            products={visibleProducts}
             additionalExpenses={additionalExpenses}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
@@ -895,7 +1022,7 @@ const App: React.FC = () => {
         )}
         {activeTab === TAB_OPTIONS.VERKAUFE && (
           <SalesPage
-            products={products}
+            products={visibleProducts}
             onUpdateProduct={handleSaveProductDetails}
             euerSettings={euerSettings}
             belegSettings={belegSettings}
@@ -906,7 +1033,7 @@ const App: React.FC = () => {
         )}
         {activeTab === TAB_OPTIONS.BELEGE && (
           <BelegePage 
-            products={products}
+            products={visibleProducts}
             euerSettings={euerSettings}
             belegSettings={belegSettings} 
             onBelegSettingsChange={setBelegSettings} 

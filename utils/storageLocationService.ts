@@ -21,7 +21,8 @@ export interface StorageLocationEntry {
 
 interface RawStorageLocationEntry {
   location_id: string;
-  timestamp: number;
+  last_update_time?: number;
+  timestamp?: number;
   value: string;
 }
 
@@ -58,7 +59,7 @@ function parseLocation(entry: RawStorageLocationEntry): StorageLocationEntry {
 
   return {
     location_id: entry.location_id,
-    timestamp: entry.timestamp,
+    timestamp: entry.last_update_time ?? entry.timestamp ?? 0,
     value: parsedValue,
   };
 }

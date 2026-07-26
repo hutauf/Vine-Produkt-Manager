@@ -1,6 +1,11 @@
 
 import { Product, ProductHistoryEntry, ProductUsage } from '../types';
 import { normalizeDateString } from './dateUtils'; // Import the new utility
+import {
+  applyLegacyUsageFlags,
+  getPreferredMyTeilwert,
+  usageStatusToLegacyFlags,
+} from './productCompatibility';
 
 
 // This is what the API expects for the 'value' part when stringified,
@@ -15,8 +20,14 @@ export interface ProductApiValue {
   teilwert_v2?: number | null;
   pdf?: string;
   myTeilwert?: number | null;
+  myteilwert?: number | null;
   myTeilwertReason?: string;
   usageStatus: ProductUsage[]; // Multiple statuses possible
+  verkauft?: boolean;
+  lager?: boolean;
+  entsorgt?: boolean;
+  storniert?: boolean;
+  betriebsausgabe?: boolean;
   salePrice?: number | null;
   saleDate?: string; // Format: TT.MM.JJJJ (Sale Date)
   buyerAddress?: string;
@@ -54,6 +65,13 @@ interface ApiResponse<T> {
 export interface ProcedureDocEntry {
   doc_id: string;
   timestamp: number;
+  value: string;
+}
+
+interface RawProcedureDocEntry {
+  doc_id: string;
+  last_update_time?: number;
+  timestamp?: number;
   value: string;
 }
 
@@ -100,6 +118,8 @@ Original error: ${error.message}`;
 // Function to convert Product to ProductApiValue (for stringification to main DB)
 const productToApiValue = (product: Product): ProductApiValue => {
   const { ASIN, last_update_time, ...apiValueFields } = product;
+  const usageStatus = Array.isArray(apiValueFields.usageStatus) ? apiValueFields.usageStatus : [];
+  const legacyUsageFlags = usageStatusToLegacyFlags(usageStatus);
   const apiValue: ProductApiValue = {
     name: apiValueFields.name,
     ordernumber: apiValueFields.ordernumber,
@@ -107,11 +127,13 @@ const productToApiValue = (product: Product): ProductApiValue => {
     etv: apiValueFields.etv,
     teilwert: apiValueFields.teilwert,
     ...(apiValueFields.teilwert_v2 !== undefined && { teilwert_v2: apiValueFields.teilwert_v2 }),
-    usageStatus: apiValueFields.usageStatus,
+    usageStatus,
     ...(apiValueFields.keepa !== undefined && { keepa: apiValueFields.keepa }),
     ...(apiValueFields.pdf !== undefined && { pdf: apiValueFields.pdf }),
     ...(apiValueFields.myTeilwert !== undefined && { myTeilwert: apiValueFields.myTeilwert }),
+    ...(apiValueFields.myTeilwert !== undefined && { myteilwert: apiValueFields.myTeilwert }),
     ...(apiValueFields.myTeilwertReason !== undefined && { myTeilwertReason: apiValueFields.myTeilwertReason }),
+    ...legacyUsageFlags,
     ...(apiValueFields.salePrice !== undefined && { salePrice: apiValueFields.salePrice }),
     ...(apiValueFields.saleDate !== undefined && { saleDate: apiValueFields.saleDate }),
     ...(apiValueFields.buyerAddress !== undefined && { buyerAddress: apiValueFields.buyerAddress }),
@@ -143,9 +165,9 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       teilwert: parseNullableNumber(valueData.teilwert),
       teilwert_v2: parseNullableNumber(valueData.teilwert_v2),
       pdf: valueData.pdf || undefined,
-      myTeilwert: parseNullableNumber(valueData.myTeilwert),
+      myTeilwert: parseNullableNumber(getPreferredMyTeilwert(valueData)),
       myTeilwertReason: valueData.myTeilwertReason || '',
-      usageStatus: Array.isArray(valueData.usageStatus) ? valueData.usageStatus : [],
+      usageStatus: applyLegacyUsageFlags(valueData),
       salePrice: parseNullableNumber(valueData.salePrice),
       saleDate: valueData.saleDate || undefined, 
       buyerAddress: valueData.buyerAddress || undefined,
@@ -171,7 +193,7 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
 
     return product;
   } catch (e: any) {
-    console.error(`Failed to parse product value for ASIN ${apiEntry.ASIN}:`, e.message, `Value: "${apiEntry.value}"`);
+    console.error(`Failed to parse product value for ASIN ${apiEntry.ASIN}:`, e.message);
     return {
       ASIN: apiEntry.ASIN, name: 'Error: Corrupted Data', ordernumber: 'N/A', date: '01/01/1970',
       etv: 0, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: apiEntry.last_update_time || 0,
@@ -187,13 +209,13 @@ export const apiGetAllProducts = async (baseUrl: string, token: string): Promise
   if (response.status === 'success' && response.data) {
     try {
       if (!Array.isArray(response.data)) {
-          console.error("API get_all (main products) did not return an array in 'data' field:", response.data);
+          console.error("API get_all (main products) did not return an array in 'data' field.");
           return { status: 'error', message: "Invalid data structure received from server (expected array for main products)." };
       }
       const products = response.data
         .map(apiEntry => {
             if (!apiEntry || typeof apiEntry.ASIN !== 'string' || typeof apiEntry.value !== 'string') {
-                console.warn("Skipping invalid API entry (main products):", apiEntry);
+                console.warn("Skipping invalid API entry (main products).");
                 return null; 
             }
             return apiEntryToProduct(apiEntry);
@@ -258,7 +280,19 @@ export const apiGetAsinHistory = async (baseUrl: string, token: string, asin: st
 
 export const apiGetProcedureDoc = async (baseUrl: string, token: string, docId: string): Promise<ApiResponse<ProcedureDocEntry[]>> => {
   const body = { token, request: "get_procedure_doc", payload: [docId] };
-  return fetchApiPost<ProcedureDocEntry[]>(baseUrl, body);
+  const response = await fetchApiPost<RawProcedureDocEntry[]>(baseUrl, body);
+  if (response.status !== 'success' || !response.data) {
+    return response as ApiResponse<ProcedureDocEntry[]>;
+  }
+
+  return {
+    ...response,
+    data: response.data.map(entry => ({
+      doc_id: entry.doc_id,
+      timestamp: entry.last_update_time ?? entry.timestamp ?? 0,
+      value: entry.value,
+    })),
+  };
 };
 
 export const apiUpdateProcedureDoc = async (
