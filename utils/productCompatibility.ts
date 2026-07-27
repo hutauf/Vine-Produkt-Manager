@@ -24,16 +24,25 @@ export const getPreferredMyTeilwert = (fields: ProductCompatibilityFields): unkn
     ? fields.myteilwert
     : fields.myTeilwert;
 
+/**
+ * Resolve legacy boolean usage flags into the canonical usageStatus list.
+ *
+ * Precedence rules:
+ * 1. A non-empty usageStatus list is authoritative. Legacy booleans must not
+ *    remove or add statuses in that case.
+ * 2. If usageStatus is missing or empty, true legacy booleans are used to
+ *    reconstruct the list.
+ * 3. false legacy booleans never remove entries from the canonical list.
+ */
 export const applyLegacyUsageFlags = (fields: ProductCompatibilityFields): ProductUsage[] => {
-  let usageStatus = Array.isArray(fields.usageStatus)
-    ? [...fields.usageStatus] as ProductUsage[]
-    : [];
+  if (Array.isArray(fields.usageStatus) && fields.usageStatus.length > 0) {
+    return [...new Set(fields.usageStatus as ProductUsage[])];
+  }
 
+  const usageStatus: ProductUsage[] = [];
   LEGACY_USAGE_FIELDS.forEach(([field, status]) => {
     if (fields[field] === true && !usageStatus.includes(status)) {
       usageStatus.push(status);
-    } else if (fields[field] === false) {
-      usageStatus = usageStatus.filter(candidate => candidate !== status);
     }
   });
 
