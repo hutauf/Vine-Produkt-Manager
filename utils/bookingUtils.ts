@@ -76,4 +76,5 @@ export const getProductBookingEntries = (product: Product, settings: EuerSetting
   return entries.sort((a, b) => a.date.getTime() - b.date.getTime());
 };
 
-export const formatBookingDate = (date: Date): string => date.toLocaleDateString('de-DE');
+export const formatBookingDate = (date: Date): string =>
+  date.toLocaleDateString('de-DE', { timeZone: 'UTC' });

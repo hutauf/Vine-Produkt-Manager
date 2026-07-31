@@ -44,7 +44,7 @@ const UsagePieCharts: React.FC<UsagePieChartsProps> = ({ products, selectedYear 
       ? products
       : products.filter(p => {
           const orderDate = parseDMYtoDate(p.date);
-          return orderDate && orderDate.getFullYear().toString() === selectedYear;
+          return orderDate && orderDate.getUTCFullYear().toString() === selectedYear;
         });
 
     const sums: Record<ProductUsage, { etv: number; teilwert: number; count: number }> = {

@@ -30,12 +30,12 @@ const ProductPlots: React.FC<ProductPlotsProps> = ({ products, yearFilter }) => 
       const orderDate = parseDMYtoDate(p.date);
       if (!orderDate) return;
 
-      const year = orderDate.getFullYear();
-      const month = orderDate.getMonth(); // 0-indexed
+      const year = orderDate.getUTCFullYear();
+      const month = orderDate.getUTCMonth(); // 0-indexed
       const monthKey = `${year}-${String(month).padStart(2, '0')}`; // e.g., "2023-00" for Jan 2023
 
       if (!monthlyAggregates[monthKey]) {
-        monthlyAggregates[monthKey] = { etv: 0, teilwert: 0, dateObj: new Date(year, month, 1) };
+        monthlyAggregates[monthKey] = { etv: 0, teilwert: 0, dateObj: new Date(Date.UTC(year, month, 1)) };
       }
       monthlyAggregates[monthKey].etv += p.etv;
       monthlyAggregates[monthKey].teilwert += (p.myTeilwert ?? p.teilwert ?? 0); // <--- MODIFIED HERE
@@ -52,7 +52,7 @@ const ProductPlots: React.FC<ProductPlotsProps> = ({ products, yearFilter }) => 
         cumulativeEtv += aggregate.etv;
         cumulativeTeilwert += aggregate.teilwert;
         
-        const displayMonth = aggregate.dateObj.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
+        const displayMonth = aggregate.dateObj.toLocaleDateString('de-DE', { month: 'short', year: '2-digit', timeZone: 'UTC' });
         dataForChart.push({
             month: displayMonth,
             cumulativeEtv,

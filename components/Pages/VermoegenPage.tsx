@@ -178,7 +178,7 @@ const VermoegenPage: React.FC<VermoegenPageProps> = ({ products, additionalExpen
 
   const formatDate = (dateObj: Date | null | undefined): string => {
     if (!dateObj || isNaN(dateObj.getTime())) return 'N/A';
-    return dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric'});
+    return dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC'});
   };
   
   const formatCurrency = (value?: number | null) => {

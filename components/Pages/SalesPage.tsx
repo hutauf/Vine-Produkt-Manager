@@ -99,7 +99,7 @@ const SalesPage: React.FC<SalesPageProps> = ({ products, onUpdateProduct, euerSe
   
   const formatDate = (date: Date | null): string => {
     if (!date || isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
   };
   
   const formatCurrency = (value?: number | null) => {

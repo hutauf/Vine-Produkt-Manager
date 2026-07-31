@@ -77,8 +77,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   };
   
   const formatDateForSearch = (dateString: string): string => {
-    const dateObj = parseDMYtoDate(dateString);
-    return dateObj ? dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dateString;
+    return parseDMYtoDate(dateString) ? dateString : '';
   };
 
   const availableYears = useMemo(() => {

@@ -13,7 +13,7 @@ import { mergeParsedProduct, parseProductsFromFile } from './utils/fileParser';
 import { exportToJson, exportToXlsx } from './utils/dataExporter';
 import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData } from './utils/apiService';
 import { FaKey } from 'react-icons/fa';
-import { parseDMYtoDate, getEffectivePrivatentnahmeDate } from './utils/dateUtils';
+import { parseDMYtoDate, getEffectivePrivatentnahmeDate, getTodayGermanFormat } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
 import { generatePdfWithAppendedDocs } from './utils/pdfGenerator';
 import { isProductIgnoredByStreuartikel } from './utils/euerUtils';
@@ -66,6 +66,34 @@ const sortProductsByOrderDate = (products: Product[]): Product[] =>
     (a, b) => (parseDMYtoDate(a.date)?.getTime() || 0) - (parseDMYtoDate(b.date)?.getTime() || 0),
   );
 
+const canonicalizeLocalProductAsins = (products: Product[]): Product[] => {
+  const grouped = new Map<string, Product[]>();
+  products.forEach(product => {
+    const canonicalAsin = typeof product.ASIN === 'string'
+      ? product.ASIN.trim().toUpperCase()
+      : '';
+    if (!/^[A-Z0-9]{10}$/.test(canonicalAsin)) return;
+    const variants = grouped.get(canonicalAsin) || [];
+    variants.push(product);
+    grouped.set(canonicalAsin, variants);
+  });
+
+  return Array.from(grouped, ([canonicalAsin, variants]) => {
+    const orderedVariants = [...variants].sort((left, right) => {
+      const timestampDifference = (left.last_update_time || 0) - (right.last_update_time || 0);
+      if (timestampDifference !== 0) return timestampDifference;
+      const canonicalDifference = Number(left.ASIN === canonicalAsin)
+        - Number(right.ASIN === canonicalAsin);
+      if (canonicalDifference !== 0) return canonicalDifference;
+      return left.ASIN.localeCompare(right.ASIN);
+    });
+    return orderedVariants.reduce<Product>(
+      (merged, variant) => ({ ...merged, ...variant, ASIN: canonicalAsin }),
+      { ...orderedVariants[0], ASIN: canonicalAsin },
+    );
+  });
+};
+
 type ProductLoadResult = {
   products: Product[];
   success: boolean;
@@ -111,15 +139,16 @@ const App: React.FC = () => {
       console.error("Failed to parse products from localStorage:", error);
       loadedProducts = [];
     }
-    return loadedProducts;
+    return canonicalizeLocalProductAsins(loadedProducts);
   });
   const productsRef = useRef<Product[]>(products);
   const serverOperationTailRef = useRef<Promise<void>>(Promise.resolve());
 
   const setCanonicalProducts = useCallback((update: React.SetStateAction<Product[]>) => {
-    const nextProducts = typeof update === 'function'
+    const candidateProducts = typeof update === 'function'
       ? update(productsRef.current)
       : update;
+    const nextProducts = canonicalizeLocalProductAsins(candidateProducts);
     productsRef.current = nextProducts;
     setProducts(nextProducts);
   }, []);
@@ -561,7 +590,7 @@ const App: React.FC = () => {
     visibleProducts.forEach(p => {
       const orderDate = parseDMYtoDate(p.date);
       if (orderDate) {
-        const year = orderDate.getFullYear().toString();
+        const year = orderDate.getUTCFullYear().toString();
         if (!productsByYear[year]) productsByYear[year] = [];
         productsByYear[year].push(p);
       }
@@ -936,12 +965,12 @@ const App: React.FC = () => {
 
 
   const handleExportJson = () => {
-    exportToJson(visibleProducts, `vine_products_export_${new Date().toISOString().split('T')[0]}.json`);
+    exportToJson(visibleProducts, `vine_products_export_${getTodayGermanFormat().replace(/\./g, '-')}.json`);
     setFeedbackMessage({text: "Produktdaten als JSON exportiert.", type: 'success'});
   };
 
   const handleExportXlsx = () => {
-    exportToXlsx(visibleProducts, `vine_products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+    exportToXlsx(visibleProducts, `vine_products_export_${getTodayGermanFormat().replace(/\./g, '-')}.xlsx`);
     setFeedbackMessage({text: "Produktdaten als XLSX exportiert.", type: 'success'});
   };
 

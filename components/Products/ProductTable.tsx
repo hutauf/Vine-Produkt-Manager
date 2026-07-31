@@ -92,7 +92,7 @@ const ProductTable: React.FC<ProductTableProps> = ({
     if (!dateString) return 'N/A';
     const dateObj = parseDMYtoDate(dateString);
     if (dateObj) {
-      return dateObj.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return dateString;
     }
     return dateString;
   };

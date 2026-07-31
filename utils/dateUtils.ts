@@ -1,65 +1,88 @@
 // utils/dateUtils.ts
 import { Product, EuerSettings } from '../types'; // Added EuerSettings
 
+export interface CalendarDateParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
+const isLeapYear = (year: number): boolean =>
+  year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+
+const daysInMonth = (year: number, month: number): number => {
+  const monthLengths = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return monthLengths[month - 1] ?? 0;
+};
+
+const validatedCalendarParts = (year: number, month: number, day: number): CalendarDateParts | null => {
+  if (
+    !Number.isInteger(year)
+    || !Number.isInteger(month)
+    || !Number.isInteger(day)
+    || year < 1900
+    || year > 2200
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth(year, month)
+  ) {
+    return null;
+  }
+  return { year, month, day };
+};
+
 /**
- * Tries to parse a date string and normalize it to DD/MM/YYYY format.
- * Handles ISO 8601 strings, DD/MM/YYYY, DD.MM.YYYY, and D.M.YYYY variations.
- * @param dateString The date string to normalize.
- * @param fieldName Optional field name for logging.
- * @param asin Optional ASIN for logging.
- * @returns The date string in DD/MM/YYYY format, or '01/01/1970' if it cannot be reliably converted.
+ * Parses an order-date string as a calendar date, never as a timestamp.
+ * ISO timestamps are accepted only as an input compatibility format; their
+ * first YYYY-MM-DD components are used without UTC/local-time conversion.
  */
-export const normalizeDateString = (dateString: string | undefined, fieldName: string = 'date', asin?: string): string => {
-  if (!dateString || typeof dateString !== 'string' || dateString.trim() === '') {
-    // console.warn(`Invalid or missing ${fieldName} provided for ASIN ${asin || 'N/A'}: '${dateString}'. Using fallback.`);
-    return '01/01/1970';
+export const parseOrderDateParts = (dateString?: string): CalendarDateParts | null => {
+  if (typeof dateString !== 'string') return null;
+  const value = dateString.trim();
+  if (!value) return null;
+
+  const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
+  if (isoMatch) {
+    return validatedCalendarParts(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]),
+      Number(isoMatch[3]),
+    );
   }
 
-  // 1. Try parsing as ISO 8601 date (YYYY-MM-DDTHH:mm:ss.sssZ or YYYY-MM-DD)
-  const isoDateCandidate = new Date(dateString);
-  // Check if it looks like an ISO date and parses to a valid date.
-  // dateString.length > 10 is a loose check for YYYY-MM-DDTHH...
-  const looksLikeISO = dateString.includes('T') || dateString.includes('Z') || (dateString.includes('-') && dateString.split('-').length === 3);
-
-  if (looksLikeISO && !isNaN(isoDateCandidate.getTime())) {
-    // Further check: if original string doesn't have '-', it might be a misinterpretation by Date constructor
-    // e.g. "01/05/2024" might be parsed by new Date() but isn't ISO.
-    // Also check if the year is plausible (e.g. not 1970 if original clearly wasn't)
-     if (isoDateCandidate.getFullYear() >= 1900 && isoDateCandidate.getFullYear() <= 2200) { // Reasonable year range
-        const day = String(isoDateCandidate.getUTCDate()).padStart(2, '0'); // Use UTCDate
-        const month = String(isoDateCandidate.getUTCMonth() + 1).padStart(2, '0'); // Month is 0-indexed, use UTCMonth
-        const year = isoDateCandidate.getUTCFullYear(); // Use getUTCFullYear
-        return `${day}/${month}/${year}`;
-     }
+  const dmyMatch = value.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (dmyMatch) {
+    return validatedCalendarParts(
+      Number(dmyMatch[3]),
+      Number(dmyMatch[2]),
+      Number(dmyMatch[1]),
+    );
   }
+  return null;
+};
 
-  // 2. Try parsing DD/MM/YYYY, DD.MM.YYYY, D/M/YYYY, D.M.YYYY etc.
-  // Regex to capture day, month, year with / or . as separator, allowing 1 or 2 digits for day/month
-  const dmyRegex = /^(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{4})$/;
-  const match = dateString.match(dmyRegex);
+export const formatOrderDate = (parts: CalendarDateParts): string =>
+  `${String(parts.day).padStart(2, '0')}/${String(parts.month).padStart(2, '0')}/${parts.year}`;
 
-  if (match) {
-    const day = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10); // month is 1-based from regex
-    const year = parseInt(match[3], 10);
-
-    // Validate as a real calendar date
-    if (year >= 1900 && year <= 2200 && month >= 1 && month <= 12) {
-        const testDate = new Date(Date.UTC(year, month - 1, day)); // month - 1 for Date constructor (0-indexed), Use UTC
-        if (testDate.getUTCFullYear() === year && testDate.getUTCMonth() === month - 1 && testDate.getUTCDate() === day) {
-            return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
-        } else {
-            console.warn(`Invalid calendar date for ${fieldName} (parsed as D.M.Y) for ASIN ${asin || 'N/A'}: ${dateString}. Date components: D=${day}, M=${month}, Y=${year}. Using fallback.`);
-            return '01/01/1970';
-        }
-    } else {
-        console.warn(`Invalid date components for ${fieldName} (parsed as D.M.Y) for ASIN ${asin || 'N/A'}: ${dateString}. D=${day}, M=${month}, Y=${year}. Using fallback.`);
-        return '01/01/1970';
-    }
+/**
+ * Normalizes valid input to DD/MM/YYYY without constructing a Date object.
+ * Missing or invalid input remains empty instead of being invented as 1970.
+ */
+export const normalizeDateString = (
+  dateString: string | undefined,
+  fieldName: string = 'date',
+  asin?: string,
+): string => {
+  const parts = parseOrderDateParts(dateString);
+  if (parts) return formatOrderDate(parts);
+  if (typeof dateString === 'string' && dateString.trim()) {
+    console.warn(
+      `Unrecognized ${fieldName} for ASIN ${asin || 'N/A'}: "${dateString}". `
+      + 'Expected a valid calendar date; leaving it empty.',
+    );
   }
-  
-  console.warn(`Unrecognized ${fieldName} format for ASIN ${asin || 'N/A'}: "${dateString}". Expected ISO, DD/MM/YYYY, or DD.MM.YYYY. Using fallback.`);
-  return '01/01/1970';
+  return '';
 };
 
 /**
@@ -68,23 +91,9 @@ export const normalizeDateString = (dateString: string | undefined, fieldName: s
  * @returns A Date object or null if parsing fails.
  */
 export const parseDMYtoDate = (dateStr: string): Date | null => {
-    if (!dateStr || !/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
-        return null;
-    }
-    const parts = dateStr.split('/');
-    const day = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
-    const year = parseInt(parts[2], 10);
-    
-    // Check year range if necessary, e.g., year >= 1900 && year <= 2200
-    if (year < 1900 || year > 2200) return null;
-
-    const date = new Date(Date.UTC(year, month, day)); // Use UTC to avoid timezone issues with Date objects
-    // Additional check to ensure the date wasn't "corrected" by the Date constructor (e.g. Feb 30 -> Mar 2)
-    if (date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day) {
-        return date;
-    }
-    return null;
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return null;
+    const parts = parseOrderDateParts(dateStr);
+    return parts ? new Date(Date.UTC(parts.year, parts.month - 1, parts.day)) : null;
 };
 
 

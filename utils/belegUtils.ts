@@ -62,7 +62,7 @@ export const generateBelegTextForPdf = (
   if (isPrivatentnahmeTextNeeded) {
       const effectivePrivatentnahmeDate = getEffectivePrivatentnahmeDate(product, euerSettings);
       if (effectivePrivatentnahmeDate) {
-          text += `Zeitpunkt der Privatentnahme nach Testabschluss: ${effectivePrivatentnahmeDate.toLocaleDateString('de-DE')}\n`;
+          text += `Zeitpunkt der Privatentnahme nach Testabschluss: ${effectivePrivatentnahmeDate.toLocaleDateString('de-DE', { timeZone: 'UTC' })}\n`;
       }
   }
   text += `\n`;

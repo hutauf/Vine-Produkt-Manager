@@ -13,7 +13,7 @@ import {
 export interface ProductApiValue {
   name: string;
   ordernumber: string;
-  date: string; // Format: DD/MM/YYYY (Order Date) or ISO String
+  date?: string; // Calendar date in DD/MM/YYYY; absent when unknown
   etv: number;
   keepa?: number | null;
   teilwert: number | null; 
@@ -75,6 +75,13 @@ interface RawProcedureDocEntry {
   value: string;
 }
 
+type RawProductValue = Record<string, unknown>;
+
+interface CanonicalProductEntries {
+  entries: ApiProductEntry[];
+  corrections: ApiProductEntry[];
+}
+
 // Generic fetch function, now accepts full URL
 async function fetchApiPost<T = any>(fullUrl: string, bodyPayload: any): Promise<ApiResponse<T>> {
   try {
@@ -120,10 +127,15 @@ const productToApiValue = (product: Product): ProductApiValue => {
   const { ASIN, last_update_time, ...apiValueFields } = product;
   const usageStatus = Array.isArray(apiValueFields.usageStatus) ? apiValueFields.usageStatus : [];
   const legacyUsageFlags = usageStatusToLegacyFlags(usageStatus);
+  const normalizedOrderDate = normalizeDateString(
+    apiValueFields.date,
+    'order date for API update',
+    ASIN,
+  );
   const apiValue: ProductApiValue = {
     name: apiValueFields.name,
     ordernumber: apiValueFields.ordernumber,
-    date: apiValueFields.date,
+    ...(normalizedOrderDate && { date: normalizedOrderDate }),
     etv: apiValueFields.etv,
     teilwert: apiValueFields.teilwert,
     ...(apiValueFields.teilwert_v2 !== undefined && { teilwert_v2: apiValueFields.teilwert_v2 }),
@@ -145,6 +157,76 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ...(apiValueFields.barcodes !== undefined && { barcodes: apiValueFields.barcodes }),
   };
   return apiValue;
+};
+
+const parseRawProductValue = (entry: ApiProductEntry): RawProductValue => {
+  const parsed = JSON.parse(entry.value) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Product ${entry.ASIN} does not contain a JSON object.`);
+  }
+  return parsed as RawProductValue;
+};
+
+/**
+ * Groups case-only ASIN variants and merges their raw JSON without dropping
+ * fields unknown to this frontend. Newer records win; on equal timestamps the
+ * already canonical uppercase key wins.
+ */
+export const canonicalizeApiProductEntries = (
+  apiEntries: ApiProductEntry[],
+): CanonicalProductEntries => {
+  const groupedEntries = new Map<string, ApiProductEntry[]>();
+  apiEntries.forEach(entry => {
+    const canonicalAsin = entry.ASIN.trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(canonicalAsin)) {
+      throw new Error(`Invalid ASIN received from API: ${entry.ASIN}`);
+    }
+    const group = groupedEntries.get(canonicalAsin) || [];
+    group.push(entry);
+    groupedEntries.set(canonicalAsin, group);
+  });
+
+  const entries: ApiProductEntry[] = [];
+  const corrections: ApiProductEntry[] = [];
+  groupedEntries.forEach((variants, canonicalAsin) => {
+    const orderedVariants = [...variants].sort((left, right) => {
+      const timestampDifference = (Number(left.last_update_time) || 0)
+        - (Number(right.last_update_time) || 0);
+      if (timestampDifference !== 0) return timestampDifference;
+      const canonicalDifference = Number(left.ASIN === canonicalAsin)
+        - Number(right.ASIN === canonicalAsin);
+      if (canonicalDifference !== 0) return canonicalDifference;
+      return left.ASIN.localeCompare(right.ASIN);
+    });
+    const mergedValue: RawProductValue = {};
+    orderedVariants.forEach(variant => {
+      Object.assign(mergedValue, parseRawProductValue(variant));
+    });
+    if (Object.prototype.hasOwnProperty.call(mergedValue, 'date')) {
+      const normalizedDate = normalizeDateString(
+        typeof mergedValue.date === 'string' ? mergedValue.date : undefined,
+        'order date during ASIN cleanup',
+        canonicalAsin,
+      );
+      if (normalizedDate) mergedValue.date = normalizedDate;
+    }
+
+    const canonicalEntry: ApiProductEntry = {
+      ASIN: canonicalAsin,
+      last_update_time: Math.max(
+        ...orderedVariants.map(variant => Number(variant.last_update_time) || 0),
+      ),
+      value: JSON.stringify(mergedValue),
+    };
+    entries.push(canonicalEntry);
+    if (
+      variants.length > 1
+      || variants.some(variant => variant.ASIN !== canonicalAsin)
+    ) {
+      corrections.push(canonicalEntry);
+    }
+  });
+  return { entries, corrections };
 };
 
 
@@ -180,10 +262,6 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       barcodes: Array.isArray(valueData.barcodes) ? valueData.barcodes : undefined,
     };
 
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(product.date)) {
-        console.warn(`Product ${product.ASIN} has an unexpected order date format ('${product.date}') AFTER normalization. Expected DD/MM/YYYY. This indicates a deeper issue.`);
-        product.date = '01/01/1970'; 
-    }
     if (product.saleDate && !/^\d{2}\.\d{2}\.\d{4}$/.test(product.saleDate)) {
         console.warn(`Product ${product.ASIN} has invalid sale date format: "${product.saleDate}". Expected TT.MM.JJJJ.`);
     }
@@ -195,7 +273,7 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
   } catch (e: any) {
     console.error(`Failed to parse product value for ASIN ${apiEntry.ASIN}:`, e.message);
     return {
-      ASIN: apiEntry.ASIN, name: 'Error: Corrupted Data', ordernumber: 'N/A', date: '01/01/1970',
+      ASIN: apiEntry.ASIN, name: 'Error: Corrupted Data', ordernumber: 'N/A', date: '',
       etv: 0, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: apiEntry.last_update_time || 0,
     };
   }
@@ -212,15 +290,32 @@ export const apiGetAllProducts = async (baseUrl: string, token: string): Promise
           console.error("API get_all (main products) did not return an array in 'data' field.");
           return { status: 'error', message: "Invalid data structure received from server (expected array for main products)." };
       }
-      const products = response.data
-        .map(apiEntry => {
-            if (!apiEntry || typeof apiEntry.ASIN !== 'string' || typeof apiEntry.value !== 'string') {
-                console.warn("Skipping invalid API entry (main products).");
-                return null; 
-            }
-            return apiEntryToProduct(apiEntry);
-        })
-        .filter(product => product !== null) as Product[];
+      const validEntries = response.data.filter(apiEntry => {
+        const valid = apiEntry
+          && typeof apiEntry.ASIN === 'string'
+          && typeof apiEntry.value === 'string';
+        if (!valid) console.warn("Skipping invalid API entry (main products).");
+        return valid;
+      });
+      const canonicalized = canonicalizeApiProductEntries(validEntries);
+      if (canonicalized.corrections.length > 0) {
+        const cleanupResponse = await fetchApiPost<null>(baseUrl, {
+          token,
+          request: 'update_asin',
+          payload: canonicalized.corrections.map(entry => ({
+            ASIN: entry.ASIN,
+            timestamp: 0,
+            value: entry.value,
+          })),
+        });
+        if (cleanupResponse.status !== 'success') {
+          return {
+            status: 'error',
+            message: `ASIN cleanup failed: ${cleanupResponse.message || 'unknown backend error'}`,
+          };
+        }
+      }
+      const products = canonicalized.entries.map(apiEntryToProduct);
       return { status: 'success', data: products };
     } catch (parseError: any) { 
       console.error("Error parsing main product data from server:", parseError);
