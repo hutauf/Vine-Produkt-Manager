@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Product, EuerSettings, ProductUsage, BelegSettings, UserAddressData, RecipientAddressData, AdditionalExpense } from './types';
+import { Product, EuerSettings, ProductUsage, BelegSettings, AdditionalExpense } from './types';
 import { DEFAULT_EUER_SETTINGS, TAB_OPTIONS, DEFAULT_BELEG_SETTINGS, BELEG_SETTINGS_STORAGE_KEY, DEFAULT_API_BASE_URL, API_BASE_URL_STORAGE_KEY, ADDITIONAL_EXPENSES_STORAGE_KEY } from './constants';
 import Navbar from './components/Layout/Navbar';
 import DashboardPage from './components/Pages/DashboardPage';
@@ -13,53 +13,59 @@ import { mergeParsedProduct, parseProductsFromFile } from './utils/fileParser';
 import { exportToJson, exportToXlsx } from './utils/dataExporter';
 import { apiGetAllProducts, apiUpdateSingleProduct, apiUpdateProducts, apiDeleteAllData } from './utils/apiService';
 import { FaKey } from 'react-icons/fa';
-import { parseDMYtoDate, getEffectivePrivatentnahmeDate, getTodayGermanFormat } from './utils/dateUtils';
+import { parseDMYtoDate, getTodayGermanFormat } from './utils/dateUtils';
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf } from './utils/belegUtils';
 import { generatePdfWithAppendedDocs } from './utils/pdfGenerator';
 import { isProductIgnoredByStreuartikel } from './utils/euerUtils';
 import { getNextProductWriteTimestamp } from './utils/productWriteUtils';
+import {
+  clearAllSyncData,
+  cloneProfileProductsIfEmpty,
+  migrateLegacyLocalStorage,
+  openProductRepository,
+  ProductSyncRepository,
+} from './utils/syncDatabase';
+import { detectSyncProtocol, runV2Sync, runWithProfileSyncLock } from './utils/syncEngine';
+import { ConflictRecord } from './utils/syncTypes';
 
 
 const API_TOKEN_STORAGE_KEY = 'vineApp_apiToken';
 const EUER_SETTINGS_STORAGE_KEY = 'vineApp_euerSettings';
 const PRODUCTS_STORAGE_KEY = 'vineApp_products';
 
-const CLIENT_EDITABLE_FIELDS: Array<keyof Product> = [
-  'usageStatus',
-  'myTeilwert',
-  'myTeilwertReason',
-  'salePrice',
-  'saleDate',
-  'buyerAddress',
-  'privatentnahmeDate',
-  'festgeschrieben',
-  'rechnungsNummer',
-  'entnahmeBelegNummer',
-  'storageLocationId',
-  'barcodes',
-];
+export const normalizeApiTokenSetting = (token: string | null): string =>
+  (token ?? '').trim();
 
-const mergeServerAndLocalProduct = (serverProduct: Product, localProduct?: Product): Product => {
-  if (!localProduct) {
-    return serverProduct;
+export const normalizeApiBaseUrlSetting = (baseUrl: string): string =>
+  baseUrl.trim();
+
+const getApiBaseUrlProfileIdentity = (baseUrl: string): string => {
+  const trimmedUrl = normalizeApiBaseUrlSetting(baseUrl);
+  try {
+    const parsed = new URL(trimmedUrl);
+    parsed.hash = '';
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if (
+      (parsed.protocol === 'https:' && parsed.port === '443')
+      || (parsed.protocol === 'http:' && parsed.port === '80')
+    ) parsed.port = '';
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    return parsed.toString();
+  } catch {
+    return trimmedUrl.replace(/\/+$/, '');
   }
-
-  const serverTimestamp = serverProduct.last_update_time || 0;
-  const localTimestamp = localProduct.last_update_time || 0;
-  const shouldKeepLocalEditableFields = localTimestamp > serverTimestamp;
-
-  if (!shouldKeepLocalEditableFields) {
-    return serverProduct;
-  }
-
-  const mergedProduct: Product = { ...serverProduct };
-  CLIENT_EDITABLE_FIELDS.forEach((field) => {
-    (mergedProduct[field] as Product[typeof field]) = localProduct[field];
-  });
-
-  mergedProduct.last_update_time = localTimestamp;
-  return mergedProduct;
 };
+
+export const apiTokenSettingsAreEquivalent = (
+  currentToken: string | null,
+  nextToken: string | null,
+): boolean => normalizeApiTokenSetting(currentToken) === normalizeApiTokenSetting(nextToken);
+
+export const apiBaseUrlSettingsAreEquivalent = (
+  currentBaseUrl: string,
+  nextBaseUrl: string,
+): boolean => getApiBaseUrlProfileIdentity(currentBaseUrl) === getApiBaseUrlProfileIdentity(nextBaseUrl);
 
 const sortProductsByOrderDate = (products: Product[]): Product[] =>
   [...products].sort(
@@ -107,8 +113,12 @@ type ProductSaveResult = {
 };
 
 const App: React.FC = () => {
-  const [apiToken, setApiToken] = useState<string | null>(() => localStorage.getItem(API_TOKEN_STORAGE_KEY));
-  const [apiBaseUrl, setApiBaseUrlState] = useState<string>(() => localStorage.getItem(API_BASE_URL_STORAGE_KEY) || DEFAULT_API_BASE_URL);
+  const [apiToken, setApiToken] = useState<string | null>(() => {
+    const normalizedToken = normalizeApiTokenSetting(localStorage.getItem(API_TOKEN_STORAGE_KEY));
+    return normalizedToken || null;
+  });
+  const [apiBaseUrl, setApiBaseUrlState] = useState<string>(() =>
+    normalizeApiBaseUrlSetting(localStorage.getItem(API_BASE_URL_STORAGE_KEY) || DEFAULT_API_BASE_URL));
   
   const initialEuerSettings = (() => {
     const storedSettingsString = localStorage.getItem(EUER_SETTINGS_STORAGE_KEY);
@@ -142,7 +152,19 @@ const App: React.FC = () => {
     return canonicalizeLocalProductAsins(loadedProducts);
   });
   const productsRef = useRef<Product[]>(products);
+  const productRepositoryRef = useRef<ProductSyncRepository | null>(null);
+  const activeProfileIdRef = useRef<string | null>(null);
+  const profileEpochRef = useRef(0);
   const serverOperationTailRef = useRef<Promise<void>>(Promise.resolve());
+  const [isProductStorageReady, setIsProductStorageReady] = useState(false);
+  const [productStorageReloadRevision, setProductStorageReloadRevision] = useState(0);
+  const [syncConflicts, setSyncConflicts] = useState<ConflictRecord[]>([]);
+  const [resolvingSyncConflictId, setResolvingSyncConflictId] = useState<number | null>(null);
+
+  const beginProductProfileTransition = useCallback(() => {
+    profileEpochRef.current += 1;
+    setIsProductStorageReady(false);
+  }, []);
 
   const setCanonicalProducts = useCallback((update: React.SetStateAction<Product[]>) => {
     const candidateProducts = typeof update === 'function'
@@ -154,7 +176,19 @@ const App: React.FC = () => {
   }, []);
 
   const runServerOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
-    const result = serverOperationTailRef.current.then(operation, operation);
+    const execute = async (): Promise<T> => {
+      try {
+        return await operation();
+      } finally {
+        try {
+          const repository = productRepositoryRef.current;
+          setSyncConflicts(repository ? await repository.listConflicts() : []);
+        } catch (error) {
+          console.error('Failed to refresh the local sync conflict list:', error);
+        }
+      }
+    };
+    const result = serverOperationTailRef.current.then(execute, execute);
     serverOperationTailRef.current = result.then(
       () => undefined,
       () => undefined,
@@ -236,18 +270,73 @@ const App: React.FC = () => {
   }, [apiBaseUrl]);
 
   const setApiBaseUrl = (newUrl: string) => {
-    setApiBaseUrlState(newUrl);
-    setFeedbackMessage({ text: `API URL aktualisiert auf: ${newUrl}. Änderungen werden bei der nächsten Server-Interaktion wirksam.`, type: 'info' });
+    const normalizedUrl = normalizeApiBaseUrlSetting(newUrl);
+    if (apiBaseUrlSettingsAreEquivalent(apiBaseUrl, normalizedUrl)) {
+      setFeedbackMessage({ text: 'API URL ist bereits unverändert gespeichert.', type: 'info' });
+      return;
+    }
+    beginProductProfileTransition();
+    setApiBaseUrlState(normalizedUrl);
+    setFeedbackMessage({ text: `API URL aktualisiert auf: ${normalizedUrl}. Änderungen werden bei der nächsten Server-Interaktion wirksam.`, type: 'info' });
   };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
-    } catch (error) {
-      console.error("Failed to save products to localStorage:", error);
-      setFeedbackMessage({ text: "Fehler beim Speichern der Produkte im lokalen Speicher. Möglicherweise ist der Speicher voll.", type: 'error' });
-    }
-  }, [products]);
+    let cancelled = false;
+    const initializationEpoch = profileEpochRef.current;
+    const isSuperseded = () => (
+      cancelled || profileEpochRef.current !== initializationEpoch
+    );
+    setIsProductStorageReady(false);
+    setSyncConflicts([]);
+    void (async () => {
+      try {
+        const previousProfileId = activeProfileIdRef.current;
+        const localRepository = await openProductRepository(apiBaseUrl, null);
+        if (isSuperseded()) return;
+        await migrateLegacyLocalStorage(localRepository.profile);
+        if (isSuperseded()) return;
+        const repository = apiToken
+          ? await openProductRepository(apiBaseUrl, apiToken)
+          : localRepository;
+        if (isSuperseded()) return;
+        if (
+          repository.profile.id !== 'local'
+          && (previousProfileId == null || previousProfileId === 'local')
+        ) {
+          await cloneProfileProductsIfEmpty('local', repository.profile.id);
+        }
+        if (isSuperseded()) return;
+        const storedProducts = canonicalizeLocalProductAsins(await repository.getProducts());
+        const storedConflicts = await repository.listConflicts();
+        if (isSuperseded()) return;
+        productRepositoryRef.current = repository;
+        activeProfileIdRef.current = repository.profile.id;
+        setCanonicalProducts(storedProducts);
+        setSyncConflicts(storedConflicts);
+        setIsProductStorageReady(true);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Failed to initialize IndexedDB product storage:', error);
+        setFeedbackMessage({
+          text: `Lokale Produktdatenbank konnte nicht geöffnet werden: ${error instanceof Error ? error.message : String(error)}`,
+          type: 'error',
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBaseUrl, apiToken, productStorageReloadRevision, setCanonicalProducts]);
+
+  useEffect(() => {
+    const repository = productRepositoryRef.current;
+    if (!isProductStorageReady || !repository || !repository.profile.localOnly) return;
+    void repository.putProducts(products).catch(error => {
+      console.error('Failed to persist products in IndexedDB:', error);
+      setFeedbackMessage({
+        text: 'Fehler beim Speichern der Produkte in IndexedDB. Die aktuelle Ansicht bleibt erhalten.',
+        type: 'error',
+      });
+    });
+  }, [isProductStorageReady, products]);
 
   useEffect(() => {
     localStorage.setItem(BELEG_SETTINGS_STORAGE_KEY, JSON.stringify(belegSettings));
@@ -296,44 +385,34 @@ const App: React.FC = () => {
       };
     }
 
-    const localProductsMap = new Map(localProducts.map(product => [product.ASIN, product]));
-    const mergedProductsMap = new Map<string, Product>();
-
-    serverResponse.data.forEach(serverProduct => {
-      const localProduct = localProductsMap.get(serverProduct.ASIN);
-      mergedProductsMap.set(
-        serverProduct.ASIN,
-        mergeServerAndLocalProduct(serverProduct, localProduct),
-      );
-    });
-
-    localProductsMap.forEach((localProduct, asin) => {
-      if (!mergedProductsMap.has(asin)) {
-        mergedProductsMap.set(asin, localProduct);
-      }
-    });
-
+    // Both protocol adapters already apply the durable local outbox/conflict
+    // overlay. Merging the previous React state again would revive records that
+    // were deleted remotely and create changes which are not represented in the outbox.
     return {
-      products: sortProductsByOrderDate(Array.from(mergedProductsMap.values())),
+      products: sortProductsByOrderDate(serverResponse.data),
       success: true,
+      message: serverResponse.message,
     };
   }, [apiBaseUrl, apiToken]);
 
   const loadProductData = useCallback(async (): Promise<Product[]> => {
-    if (!apiToken) return productsRef.current;
+    if (!apiToken || !isProductStorageReady) return productsRef.current;
+    const operationEpoch = profileEpochRef.current;
 
     return runServerOperation(async () => {
       setIsLoading(true);
       setFeedbackMessage(null);
       try {
         const result = await fetchMergedProductData(productsRef.current);
+        if (operationEpoch !== profileEpochRef.current) return productsRef.current;
         if (result.success) {
           setCanonicalProducts(result.products);
           setFeedbackMessage({
-            text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${result.products.length} Produkte).`,
-            type: 'success',
+            text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${result.products.length} Produkte).${result.message ? ` ${result.message}` : ''}`,
+            type: result.message ? 'info' : 'success',
           });
         } else if (result.invalidToken) {
+          beginProductProfileTransition();
           setApiToken(null);
           setFeedbackMessage({
             text: 'Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.',
@@ -350,7 +429,7 @@ const App: React.FC = () => {
         setIsLoading(false);
       }
     });
-  }, [apiToken, fetchMergedProductData, runServerOperation, setCanonicalProducts]);
+  }, [apiToken, beginProductProfileTransition, fetchMergedProductData, isProductStorageReady, runServerOperation, setCanonicalProducts]);
 
 
   const setEuerSettings = (newSettings: EuerSettings | ((prevState: EuerSettings) => EuerSettings)) => {
@@ -372,10 +451,10 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (apiToken) {
+    if (apiToken && isProductStorageReady) {
         loadProductData();
     }
-  }, [apiToken, apiBaseUrl, loadProductData]);
+  }, [apiToken, apiBaseUrl, isProductStorageReady, loadProductData]);
 
   useEffect(() => {
     localStorage.setItem(EUER_SETTINGS_STORAGE_KEY, JSON.stringify(euerSettings));
@@ -394,8 +473,13 @@ const App: React.FC = () => {
   };
 
   const handleApiTokenChange = (newToken: string) => {
-    const trimmedToken = newToken.trim();
-    setApiToken(trimmedToken); 
+    const trimmedToken = normalizeApiTokenSetting(newToken);
+    if (apiTokenSettingsAreEquivalent(apiToken, trimmedToken)) {
+      setFeedbackMessage({ text: 'API Token ist bereits unverändert gespeichert.', type: 'info' });
+      return;
+    }
+    beginProductProfileTransition();
+    setApiToken(trimmedToken || null);
     if (trimmedToken) {
       setFeedbackMessage({ text: "API Token gespeichert. Daten werden vom Server geladen...", type: 'success' });
     } else {
@@ -409,22 +493,46 @@ const App: React.FC = () => {
       return;
     }
     setIsLoading(true);
-    const response = await runServerOperation(
-      () => apiDeleteAllData(apiBaseUrl, apiToken),
-    );
-    if (response.status === 'success') {
-      setFeedbackMessage({ text: response.message || "Alle Produktdaten auf dem Server gelöscht.", type: 'success' });
-    } else {
-      setFeedbackMessage({ text: `Fehler beim Löschen der Serverdaten: ${response.message || 'Unbekannter Fehler.'}`, type: 'error' });
+    try {
+      const response = await runServerOperation(async () => {
+        return apiDeleteAllData(apiBaseUrl, apiToken);
+      });
+      if (response.status === 'success') {
+        setSyncConflicts([]);
+        setFeedbackMessage({ text: response.message || "Alle Produktdaten auf dem Server gelöscht.", type: 'success' });
+      } else {
+        setFeedbackMessage({ text: `Fehler beim Löschen der Serverdaten: ${response.message || 'Unbekannter Fehler.'}`, type: 'error' });
+      }
+    } catch (error) {
+      setFeedbackMessage({
+        text: `Fehler beim Löschen der Serverdaten: ${error instanceof Error ? error.message : String(error)}`,
+        type: 'error',
+      });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
-  const handleClearLocalDataAndToken = () => {
-    setApiToken(null); 
-    setCanonicalProducts([]);
-    setAdditionalExpenses([]); 
-    setFeedbackMessage({ text: "Lokale Produktdaten, Ausgaben und API Token entfernt.", type: 'success' });
+  const handleClearLocalDataAndToken = async () => {
+    beginProductProfileTransition();
+    try {
+      await runServerOperation(() => clearAllSyncData());
+      productRepositoryRef.current = null;
+      activeProfileIdRef.current = null;
+      localStorage.removeItem(PRODUCTS_STORAGE_KEY);
+      setApiToken(null);
+      setCanonicalProducts([]);
+      setSyncConflicts([]);
+      setAdditionalExpenses([]);
+      setFeedbackMessage({ text: "Lokale Produktdaten, Ausgaben und API Token entfernt.", type: 'success' });
+    } catch (error) {
+      setFeedbackMessage({
+        text: `Lokale Daten konnten nicht gelöscht werden: ${error instanceof Error ? error.message : String(error)}`,
+        type: 'error',
+      });
+    } finally {
+      setProductStorageReloadRevision(revision => revision + 1);
+    }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -442,6 +550,7 @@ const App: React.FC = () => {
       }
       
       const productsToActuallyProcess: Product[] = [];
+      const baseProductsForImport: Array<Product | undefined> = [];
       const currentProductsMap = new Map(productsRef.current.map(p => [p.ASIN, p]));
       let skippedCount = 0;
       const importTimestamp = Math.floor(Date.now() / 1000);
@@ -463,6 +572,7 @@ const App: React.FC = () => {
             ),
           };
           productsToActuallyProcess.push(productToImport);
+          baseProductsForImport.push(existingProduct);
           currentProductsMap.set(productToImport.ASIN, productToImport);
         } else {
           skippedCount++;
@@ -486,7 +596,12 @@ const App: React.FC = () => {
       } else {
         await runServerOperation(async () => {
           setIsLoading(true);
-          const response = await apiUpdateProducts(apiBaseUrl, apiToken, productsToActuallyProcess);
+          const response = await apiUpdateProducts(
+            apiBaseUrl,
+            apiToken,
+            productsToActuallyProcess,
+            baseProductsForImport,
+          );
           if (response.status !== 'success') {
             setFeedbackMessage({
               text: `Fehler beim Server-Upload: ${response.message || 'Unbekannter Fehler.'} Der Import bleibt lokal gespeichert.`,
@@ -510,6 +625,93 @@ const App: React.FC = () => {
       const errorMessage = err instanceof Error ? err.message : "Fehler bei Dateiverarbeitung.";
       setFeedbackMessage({ text: errorMessage, type: 'error' });
     } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResolveSyncConflict = async (
+    conflictId: number,
+    resolution: 'server' | 'local',
+  ): Promise<void> => {
+    const repository = productRepositoryRef.current;
+    if (!repository) {
+      setFeedbackMessage({ text: 'Die lokale Produktdatenbank ist noch nicht bereit.', type: 'error' });
+      return;
+    }
+    const operationEpoch = profileEpochRef.current;
+    setResolvingSyncConflictId(conflictId);
+    setIsLoading(true);
+    try {
+      await runServerOperation(async () => {
+        const selectedConflict = (await repository.listConflicts())
+          .find(conflict => conflict.id === conflictId);
+        await runWithProfileSyncLock(
+          repository.profile.id,
+          () => repository.resolveConflict(conflictId, resolution),
+        );
+        if (operationEpoch !== profileEpochRef.current) return;
+        if (resolution === 'local' && apiToken) {
+          const localProduct = (await repository.getProducts())
+            .find(product => product.ASIN === selectedConflict?.entityId);
+          const capabilities = await detectSyncProtocol(repository, apiBaseUrl, apiToken);
+          if (capabilities) {
+            const syncResult = await runV2Sync(
+              repository,
+              apiBaseUrl,
+              apiToken,
+              capabilities,
+            );
+            if (operationEpoch !== profileEpochRef.current) return;
+            setCanonicalProducts(syncResult.products);
+          } else if (localProduct) {
+            const upload = await apiUpdateSingleProduct(apiBaseUrl, apiToken, localProduct);
+            if (upload.status !== 'success' || (upload.skipped ?? 0) > 0) {
+              throw new Error(
+                upload.message || 'Die lokale Konfliktlösung konnte nicht per V1 synchronisiert werden.',
+              );
+            }
+            if (operationEpoch !== profileEpochRef.current) return;
+            const refreshed = await apiGetAllProducts(apiBaseUrl, apiToken);
+            if (refreshed.status !== 'success' || !refreshed.data) {
+              throw new Error(refreshed.message || 'Der bestätigte Serverstand konnte nicht geladen werden.');
+            }
+            if (operationEpoch !== profileEpochRef.current) return;
+            setCanonicalProducts(refreshed.data);
+          } else {
+            setCanonicalProducts(await repository.getProducts());
+            throw new Error(
+              'Der alte V1-Server kann eine einzelne lokale Löschung nicht sicher synchronisieren. '
+              + 'Die Löschung bleibt lokal vorgemerkt, bis der Server V2 unterstützt.',
+            );
+          }
+          const sameEntityStillConflicts = selectedConflict
+            && (await repository.listConflicts()).some(conflict => (
+              conflict.entityType === selectedConflict.entityType
+              && conflict.entityId === selectedConflict.entityId
+            ));
+          if (sameEntityStillConflicts) {
+            throw new Error('Die Änderung kollidiert weiterhin mit einem neueren Serverstand.');
+          }
+        } else {
+          setCanonicalProducts(await repository.getProducts());
+        }
+      });
+      if (operationEpoch !== profileEpochRef.current) return;
+      setFeedbackMessage({
+        text: resolution === 'local'
+          ? 'Lokale Änderung wurde auf den aktuellen Serverstand übertragen.'
+          : 'Serverstand wurde für den Konflikt übernommen.',
+        type: 'success',
+      });
+    } catch (error) {
+      if (operationEpoch === profileEpochRef.current) {
+        setFeedbackMessage({
+          text: `Konflikt konnte nicht aufgelöst werden: ${error instanceof Error ? error.message : String(error)}`,
+          type: 'error',
+        });
+      }
+    } finally {
+      setResolvingSyncConflictId(null);
       setIsLoading(false);
     }
   };
@@ -546,7 +748,12 @@ const App: React.FC = () => {
     try {
       return await runServerOperation(async (): Promise<ProductSaveResult> => {
         setIsLoading(true);
-        const response = await apiUpdateSingleProduct(apiBaseUrl, apiToken, productWithTimestamp);
+        const response = await apiUpdateSingleProduct(
+          apiBaseUrl,
+          apiToken,
+          productWithTimestamp,
+          previousProduct,
+        );
         if (response.status !== 'success') {
           const message = `Server-Aktualisierungsfehler für ${productWithTimestamp.ASIN}: ${response.message || 'Unbekannt.'} Lokale Änderung bleibt.`;
           setFeedbackMessage({ text: message, type: 'error' });
@@ -692,7 +899,12 @@ const App: React.FC = () => {
 
         if (apiToken) {
             const response = await runServerOperation(
-              () => apiUpdateSingleProduct(apiBaseUrl, apiToken, finalizedProductData),
+              () => apiUpdateSingleProduct(
+                apiBaseUrl,
+                apiToken,
+                finalizedProductData,
+                productToFinalize,
+              ),
             );
             if (response.status !== 'success') {
                 throw new Error(`Server-Update fehlgeschlagen: ${response.message || 'Unbekannt'}`);
@@ -754,7 +966,10 @@ const App: React.FC = () => {
         setIsLoading(true);
         const pulled = await fetchMergedProductData(productsRef.current);
         if (!pulled.success) {
-          if (pulled.invalidToken) setApiToken(null);
+          if (pulled.invalidToken) {
+            beginProductProfileTransition();
+            setApiToken(null);
+          }
           setFeedbackMessage({
             text: `Vollständige Synchronisation abgebrochen: Serverdaten konnten nicht geladen werden (${pulled.message || 'unbekannter Fehler'}). Es wurde nichts hochgeladen.`,
             type: 'error',
@@ -781,7 +996,12 @@ const App: React.FC = () => {
           text: `Lokale und Serverdaten gemischt (${productsWithTimestamps.length}). Lade auf Server hoch...`,
           type: 'info',
         });
-        const uploadResponse = await apiUpdateProducts(apiBaseUrl, apiToken, productsWithTimestamps);
+        const uploadResponse = await apiUpdateProducts(
+          apiBaseUrl,
+          apiToken,
+          productsWithTimestamps,
+          pulled.products,
+        );
         if (uploadResponse.status !== 'success') {
           setFeedbackMessage({
             text: `Fehler beim Hochladen der gemischten Daten: ${uploadResponse.message || 'Unbekannter Fehler.'}`,
@@ -855,6 +1075,8 @@ const App: React.FC = () => {
     }
 
     const updatesByAsin = new Map(productsToUpdate.map(product => [product.ASIN, product]));
+    const baseProducts = productsToUpdate
+      .map(product => productsRef.current.find(current => current.ASIN === product.ASIN));
     setCanonicalProducts(prevProducts =>
       sortProductsByOrderDate(
         prevProducts.map(product => updatesByAsin.get(product.ASIN) ?? product),
@@ -863,7 +1085,7 @@ const App: React.FC = () => {
 
     if (apiToken) {
       const response = await runServerOperation(
-        () => apiUpdateProducts(apiBaseUrl, apiToken, productsToUpdate),
+        () => apiUpdateProducts(apiBaseUrl, apiToken, productsToUpdate, baseProducts),
       );
       if (response.status === 'success' && (response.skipped ?? 0) === 0) {
         setFeedbackMessage({ text: `${productsToUpdate.length} Produkte serverseitig festgeschrieben.`, type: 'success' });
@@ -933,6 +1155,8 @@ const App: React.FC = () => {
       });
 
       const updatedProductASINs = new Set(updatedProductsInBulk.map(p => p.ASIN));
+      const baseProducts = updatedProductsInBulk
+        .map(product => productsRef.current.find(current => current.ASIN === product.ASIN));
       setCanonicalProducts(prev =>
         sortProductsByOrderDate(
           prev.map(p => updatedProductASINs.has(p.ASIN)
@@ -944,7 +1168,7 @@ const App: React.FC = () => {
 
       if (apiToken) {
         const response = await runServerOperation(
-          () => apiUpdateProducts(apiBaseUrl, apiToken, updatedProductsInBulk),
+          () => apiUpdateProducts(apiBaseUrl, apiToken, updatedProductsInBulk, baseProducts),
         );
         if (response.status !== 'success') {
           throw new Error(`Server-Update für Sammelbeleg fehlgeschlagen: ${response.message || 'Unbekannt'}`);
@@ -990,7 +1214,17 @@ const App: React.FC = () => {
         </div>
       )}
       <main className="flex-grow container mx-auto p-4 sm:p-6 lg:p-8">
-        {isLoading && <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90]"><div className="text-white text-xl">Laden...</div></div>}
+        {(!isProductStorageReady || isLoading) && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90]"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="text-white text-xl">
+              {isProductStorageReady ? 'Laden...' : 'Lokale Produktdatenbank wird vorbereitet...'}
+            </div>
+          </div>
+        )}
         
         {activeTab === TAB_OPTIONS.DASHBOARD && (
           <>
@@ -1089,6 +1323,9 @@ const App: React.FC = () => {
                 onDeleteAllServerData={handleDeleteAllServerData}
                 onClearLocalDataAndToken={handleClearLocalDataAndToken}
                 onBulkFestschreiben={handleBulkFestschreiben}
+                syncConflicts={syncConflicts}
+                resolvingSyncConflictId={resolvingSyncConflictId}
+                onResolveSyncConflict={handleResolveSyncConflict}
             />
         )}
       </main>

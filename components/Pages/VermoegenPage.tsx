@@ -1,6 +1,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Product, ProductUsage, AdditionalExpense, VermoegenPageProps } from '../../types';
+import { Product, ProductUsage, VermoegenPageProps } from '../../types';
 import { FaArchive, FaSort, FaSortUp, FaSortDown, FaBuilding, FaPlusCircle, FaTrashAlt, FaDollarSign, FaEdit, FaCopy } from 'react-icons/fa';
 import { parseDMYtoDate, parseGermanDate, normalizeGermanDateInput, convertGermanToISO, convertISOToGerman, getTodayGermanFormat } from '../../utils/dateUtils';
 import Button from '../Common/Button';

@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Product, BelegSettings, UserAddressData, RecipientAddressData, ProductUsage, EuerSettings } from '../../types';
 import Button from '../Common/Button';
-import { FaSave, FaUserEdit, FaBuilding, FaListAlt, FaArchive, FaPrint, FaCheckCircle, FaInfoCircle, FaFilePdf, FaSpinner, FaExternalLinkAlt, FaEdit, FaCalendarAlt, FaBoxes, FaFileInvoiceDollar, FaFileSignature } from 'react-icons/fa';
-import { parseDMYtoDate, getEffectivePrivatentnahmeDate, convertGermanToISO, convertISOToGerman, getEndOfQuarter, getOldestUnfinalizedProductDate, parseGermanDate, formatDateToGermanDDMMYYYY } from '../../utils/dateUtils';
+import { FaUserEdit, FaListAlt, FaArchive, FaPrint, FaCheckCircle, FaInfoCircle, FaFilePdf, FaSpinner, FaExternalLinkAlt, FaEdit, FaBoxes, FaFileInvoiceDollar, FaFileSignature } from 'react-icons/fa';
+import { parseDMYtoDate, convertGermanToISO, convertISOToGerman, getEndOfQuarter, getOldestUnfinalizedProductDate, parseGermanDate, formatDateToGermanDDMMYYYY } from '../../utils/dateUtils';
 import { generatePdfWithAppendedDocs } from '../../utils/pdfGenerator'; 
 import { generateBelegTextForPdf, generateBulkBelegTextForPdf, generateAusgabeBelegTextForPdf, generateEntnahmeBelegTextForPdf } from '../../utils/belegUtils'; 
 import { getProductBaseValue, isProductIgnoredForBelegAndEuer } from '../../utils/euerUtils';
@@ -646,7 +646,7 @@ const BelegePage: React.FC<BelegePageProps> = ({
                       onClick={handleGenerateAusgabeBeleg}
                       className="w-full"
                       leftIcon={<FaFileInvoiceDollar />}
-                      disabled={activeSubTab !== 'archiviert' || !canGenerateAusgabeBeleg || isFestschreibenLoading || isSideReceiptLoading || currentBelegDisplayInfo.type === 'none'}
+                      disabled={activeSubTab !== 'archiviert' || !canGenerateAusgabeBeleg || isFestschreibenLoading || isSideReceiptLoading}
                       isLoading={isSideReceiptLoading}
                     >
                       Ausgabebeleg erzeugen
@@ -656,7 +656,7 @@ const BelegePage: React.FC<BelegePageProps> = ({
                       onClick={handleGenerateEntnahmeBeleg}
                       className="w-full"
                       leftIcon={<FaFileSignature />}
-                      disabled={activeSubTab !== 'archiviert' || !entnahmeReceiptProducts.length || isFestschreibenLoading || isSideReceiptLoading || currentBelegDisplayInfo.type === 'none'}
+                      disabled={activeSubTab !== 'archiviert' || !entnahmeReceiptProducts.length || isFestschreibenLoading || isSideReceiptLoading}
                       isLoading={isSideReceiptLoading}
                     >
                       Entnahmebeleg erzeugen

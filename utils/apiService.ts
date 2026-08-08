@@ -2,15 +2,22 @@
 import { Product, ProductHistoryEntry, ProductUsage } from '../types';
 import { normalizeDateString } from './dateUtils'; // Import the new utility
 import {
-  applyLegacyUsageFlags,
-  getPreferredMyTeilwert,
   usageStatusToLegacyFlags,
 } from './productCompatibility';
+import { normalizeSyncedProduct } from './syncProductCompatibility';
+import { openProductRepository } from './syncDatabase';
+import {
+  detectSyncProtocol,
+  queueProductsForSync,
+  runV2Sync,
+  runWithProfileSyncLock,
+} from './syncEngine';
 
 
 // This is what the API expects for the 'value' part when stringified,
 // and what we get back when parsing the 'value' string.
 export interface ProductApiValue {
+  [key: string]: unknown;
   name: string;
   ordernumber: string;
   date?: string; // Calendar date in DD/MM/YYYY; absent when unknown
@@ -53,13 +60,15 @@ export interface TeilwertV2ApiValue {
 }
 
 
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   status: 'success' | 'error';
   message?: string;
   data?: T;
   inserted?: number;
   updated?: number;
   skipped?: number;
+  syncProtocol?: 'v1' | 'v2';
+  conflicts?: number;
 }
 
 export interface ProcedureDocEntry {
@@ -123,7 +132,7 @@ Original error: ${error.message}`;
 
 
 // Function to convert Product to ProductApiValue (for stringification to main DB)
-const productToApiValue = (product: Product): ProductApiValue => {
+export const productToApiValue = (product: Product): ProductApiValue => {
   const { ASIN, last_update_time, ...apiValueFields } = product;
   const usageStatus = Array.isArray(apiValueFields.usageStatus) ? apiValueFields.usageStatus : [];
   const legacyUsageFlags = usageStatusToLegacyFlags(usageStatus);
@@ -133,6 +142,7 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ASIN,
   );
   const apiValue: ProductApiValue = {
+    ...apiValueFields,
     name: apiValueFields.name,
     ordernumber: apiValueFields.ordernumber,
     ...(normalizedOrderDate && { date: normalizedOrderDate }),
@@ -156,9 +166,9 @@ const productToApiValue = (product: Product): ProductApiValue => {
     ...(apiValueFields.storageLocationId !== undefined && { storageLocationId: apiValueFields.storageLocationId }),
     ...(apiValueFields.barcodes !== undefined && { barcodes: apiValueFields.barcodes }),
   };
+  if (!normalizedOrderDate) delete apiValue.date;
   return apiValue;
 };
-
 const parseRawProductValue = (entry: ApiProductEntry): RawProductValue => {
   const parsed = JSON.parse(entry.value) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -208,7 +218,11 @@ export const canonicalizeApiProductEntries = (
         'order date during ASIN cleanup',
         canonicalAsin,
       );
-      if (normalizedDate) mergedValue.date = normalizedDate;
+      if (normalizedDate) {
+        mergedValue.date = normalizedDate;
+      } else {
+        delete mergedValue.date;
+      }
     }
 
     const canonicalEntry: ApiProductEntry = {
@@ -231,36 +245,14 @@ export const canonicalizeApiProductEntries = (
 
 
 // Function to convert ApiProductEntry (from main DB) to Product
-const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
+export const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
   try {
-    const valueData = JSON.parse(apiEntry.value) as Partial<ProductApiValue>; 
-
-    const normalizedOrderDate = normalizeDateString(valueData.date, 'order date from API', apiEntry.ASIN);
-    
-    const product: Product = {
-      ASIN: apiEntry.ASIN,
-      name: valueData.name || 'N/A',
-      ordernumber: valueData.ordernumber || 'N/A',
-      date: normalizedOrderDate, 
-      etv: parseNullableNumber(valueData.etv) ?? 0,
-      keepa: parseNullableNumber(valueData.keepa),
-      teilwert: parseNullableNumber(valueData.teilwert),
-      teilwert_v2: parseNullableNumber(valueData.teilwert_v2),
-      pdf: valueData.pdf || undefined,
-      myTeilwert: parseNullableNumber(getPreferredMyTeilwert(valueData)),
-      myTeilwertReason: valueData.myTeilwertReason || '',
-      usageStatus: applyLegacyUsageFlags(valueData),
-      salePrice: parseNullableNumber(valueData.salePrice),
-      saleDate: valueData.saleDate || undefined, 
-      buyerAddress: valueData.buyerAddress || undefined,
-      privatentnahmeDate: valueData.privatentnahmeDate || undefined, 
-      last_update_time: typeof apiEntry.last_update_time === 'number' ? apiEntry.last_update_time : 0,
-      festgeschrieben: valueData.festgeschrieben === 1 ? 1 : undefined,
-      rechnungsNummer: valueData.rechnungsNummer || undefined, 
-      entnahmeBelegNummer: valueData.entnahmeBelegNummer || undefined,
-      storageLocationId: valueData.storageLocationId || undefined,
-      barcodes: Array.isArray(valueData.barcodes) ? valueData.barcodes : undefined,
-    };
+    const valueData = JSON.parse(apiEntry.value) as RawProductValue;
+    const product = normalizeSyncedProduct(
+      apiEntry.ASIN,
+      valueData,
+      typeof apiEntry.last_update_time === 'number' ? apiEntry.last_update_time : 0,
+    );
 
     if (product.saleDate && !/^\d{2}\.\d{2}\.\d{4}$/.test(product.saleDate)) {
         console.warn(`Product ${product.ASIN} has invalid sale date format: "${product.saleDate}". Expected TT.MM.JJJJ.`);
@@ -281,78 +273,196 @@ const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
 
 
 export const apiGetAllProducts = async (baseUrl: string, token: string): Promise<ApiResponse<Product[]>> => {
-  const body = { token, request: "get_all" };
-  const response = await fetchApiPost<ApiProductEntry[]>(baseUrl, body);
+  const repository = await openProductRepository(baseUrl, token);
+  try {
+    const capabilities = await detectSyncProtocol(repository, baseUrl, token);
+    if (capabilities) {
+      const result = await runV2Sync(repository, baseUrl, token, capabilities);
+      return {
+        status: 'success',
+        data: result.products,
+        syncProtocol: 'v2',
+        conflicts: result.conflicts,
+        message: [
+          result.warning,
+          result.conflicts > 0
+            ? `${result.conflicts} Synchronisationskonflikt(e) benötigen eine Auflösung.`
+            : undefined,
+        ].filter(Boolean).join(' ') || undefined,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return runWithProfileSyncLock(repository.profile.id, async () => {
+    const body = { token, request: "get_all" };
+    const response = await fetchApiPost<ApiProductEntry[]>(baseUrl, body);
 
-  if (response.status === 'success' && response.data) {
-    try {
-      if (!Array.isArray(response.data)) {
+    if (response.status === 'success' && response.data) {
+      try {
+        if (!Array.isArray(response.data)) {
           console.error("API get_all (main products) did not return an array in 'data' field.");
           return { status: 'error', message: "Invalid data structure received from server (expected array for main products)." };
-      }
-      const validEntries = response.data.filter(apiEntry => {
-        const valid = apiEntry
-          && typeof apiEntry.ASIN === 'string'
-          && typeof apiEntry.value === 'string';
-        if (!valid) console.warn("Skipping invalid API entry (main products).");
-        return valid;
-      });
-      const canonicalized = canonicalizeApiProductEntries(validEntries);
-      if (canonicalized.corrections.length > 0) {
-        const cleanupResponse = await fetchApiPost<null>(baseUrl, {
-          token,
-          request: 'update_asin',
-          payload: canonicalized.corrections.map(entry => ({
-            ASIN: entry.ASIN,
-            timestamp: 0,
-            value: entry.value,
-          })),
-        });
-        if (cleanupResponse.status !== 'success') {
-          return {
-            status: 'error',
-            message: `ASIN cleanup failed: ${cleanupResponse.message || 'unknown backend error'}`,
-          };
         }
+        const validEntries = response.data.filter(apiEntry => {
+          const valid = apiEntry
+            && typeof apiEntry.ASIN === 'string'
+            && typeof apiEntry.value === 'string';
+          if (!valid) console.warn("Skipping invalid API entry (main products).");
+          return valid;
+        });
+        const canonicalized = canonicalizeApiProductEntries(validEntries);
+        if (canonicalized.corrections.length > 0) {
+          const cleanupResponse = await fetchApiPost<null>(baseUrl, {
+            token,
+            request: 'update_asin',
+            payload: canonicalized.corrections.map(entry => ({
+              ASIN: entry.ASIN,
+              timestamp: 0,
+              value: entry.value,
+            })),
+          });
+          if (cleanupResponse.status !== 'success') {
+            return {
+              status: 'error',
+              message: `ASIN cleanup failed: ${cleanupResponse.message || 'unknown backend error'}`,
+            };
+          }
+        }
+        const products = canonicalized.entries.map(apiEntryToProduct);
+        const mergedProducts = await repository.applyV1ServerProducts(products);
+        return {
+          status: 'success',
+          data: mergedProducts,
+          syncProtocol: 'v1',
+          message: 'Server unterstützt noch keinen inkrementellen V2-Sync; kompatibler V1-Vollsync ist aktiv.',
+        } as ApiResponse<Product[]>;
+      } catch (parseError: any) {
+        console.error("Error parsing main product data from server:", parseError);
+        return { status: 'error', message: parseError.message || "Failed to parse one or more main product data entries from server." };
       }
-      const products = canonicalized.entries.map(apiEntryToProduct);
-      return { status: 'success', data: products };
-    } catch (parseError: any) { 
-      console.error("Error parsing main product data from server:", parseError);
-      return { status: 'error', message: parseError.message || "Failed to parse one or more main product data entries from server." };
     }
-  }
-  return response as ApiResponse<any>; 
+    return {
+      status: response.status,
+      message: response.message,
+      inserted: response.inserted,
+      updated: response.updated,
+      skipped: response.skipped,
+    };
+  });
 };
 
-export const apiUpdateProducts = async (baseUrl: string, token: string, productsToUpdate: Product[]): Promise<ApiResponse<null>> => {
+export const apiUpdateProducts = async (
+  baseUrl: string,
+  token: string,
+  productsToUpdate: Product[],
+  baseProducts: Array<Product | undefined> = [],
+): Promise<ApiResponse<null>> => {
   if (productsToUpdate.length === 0) {
     return { status: 'success', message: 'No products to update.', inserted:0, updated:0, skipped:0 };
   }
-  
-  const payload = productsToUpdate.map(p => ({
-    ASIN: p.ASIN,
-    timestamp: p.last_update_time || Math.floor(Date.now() / 1000), 
-    value: JSON.stringify(productToApiValue(p)),
-  }));
-  const body = { token, request: "update_asin", payload };
-  return fetchApiPost<null>(baseUrl, body);
+  const repository = await openProductRepository(baseUrl, token);
+  await queueProductsForSync(repository, productsToUpdate, baseProducts);
+  try {
+    const capabilities = await detectSyncProtocol(repository, baseUrl, token);
+    if (capabilities) {
+      const result = await runV2Sync(repository, baseUrl, token, capabilities);
+      const targetAsins = new Set(productsToUpdate.map(product => product.ASIN.trim().toUpperCase()));
+      const targetConflicts = new Set((await repository.listConflicts())
+        .filter(conflict => (
+          conflict.entityType === 'product' && targetAsins.has(conflict.entityId)
+        ))
+        .map(conflict => conflict.entityId));
+      return {
+        status: 'success',
+        message: [
+          'Inkrementelle Synchronisierung abgeschlossen.',
+          result.warning,
+          result.conflicts > 0
+            ? `${result.conflicts} Änderung(en) stehen in der Konfliktliste.`
+            : undefined,
+        ].filter(Boolean).join(' '),
+        updated: result.pushed,
+        inserted: 0,
+        skipped: targetConflicts.size,
+        syncProtocol: 'v2',
+        conflicts: result.conflicts,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  return runWithProfileSyncLock(repository.profile.id, async () => {
+    const preparedV1 = await repository.prepareV1Upload(
+      productsToUpdate.map(product => product.ASIN),
+    );
+    const productsForV1 = preparedV1.products;
+    const blockedByConflict = preparedV1.blockedAsins.length;
+    if (productsForV1.length === 0) {
+      return {
+        status: 'success',
+        message: blockedByConflict > 0
+          ? `${blockedByConflict} Änderung(en) stehen in der Konfliktliste und wurden nicht per V1 überschrieben.`
+          : 'Keine synchronisierbaren Produkte gefunden.',
+        inserted: 0,
+        updated: 0,
+        skipped: blockedByConflict,
+        syncProtocol: 'v1',
+        conflicts: await repository.countConflicts(),
+      } as ApiResponse<null>;
+    }
+    const payload = productsForV1.map(p => ({
+      ASIN: p.ASIN,
+      timestamp: p.last_update_time || Math.floor(Date.now() / 1000),
+      value: JSON.stringify(productToApiValue(p)),
+    }));
+    const body = { token, request: "update_asin", payload };
+    const response = await fetchApiPost<null>(baseUrl, body);
+    if (response.status === 'success') {
+      const serverSkipped = response.skipped ?? 0;
+      if (serverSkipped === 0) {
+        await repository.acknowledgeV1Products(productsForV1, preparedV1.mutationIds);
+      }
+      response.skipped = serverSkipped + blockedByConflict;
+      response.syncProtocol = 'v1';
+      response.conflicts = await repository.countConflicts();
+      response.message = [
+        response.message
+          ?? 'Kompatibler V1-Vollsync aktiv; für schnelleren Sync kann der Server aktualisiert werden.',
+        blockedByConflict > 0
+          ? `${blockedByConflict} Änderung(en) stehen in der Konfliktliste und wurden nicht per V1 überschrieben.`
+          : undefined,
+      ].filter(Boolean).join(' ');
+    }
+    return response;
+  });
 };
 
-export const apiUpdateSingleProduct = async (baseUrl: string, token: string, productToUpdate: Product): Promise<ApiResponse<null>> => {
-  const payload = [{
-    ASIN: productToUpdate.ASIN,
-    timestamp: productToUpdate.last_update_time || Math.floor(Date.now() / 1000), 
-    value: JSON.stringify(productToApiValue(productToUpdate)),
-  }];
-  const body = { token, request: "update_asin", payload };
-  return fetchApiPost<null>(baseUrl, body);
+export const apiUpdateSingleProduct = async (
+  baseUrl: string,
+  token: string,
+  productToUpdate: Product,
+  baseProduct?: Product,
+): Promise<ApiResponse<null>> => {
+  return apiUpdateProducts(baseUrl, token, [productToUpdate], baseProduct ? [baseProduct] : []);
 };
 
 
 export const apiDeleteAllData = async (baseUrl: string, token: string): Promise<ApiResponse<null>> => {
-  const body = { token, request: "delete_all" };
-  return fetchApiPost<null>(baseUrl, body);
+  const repository = await openProductRepository(baseUrl, token);
+  return runWithProfileSyncLock(repository.profile.id, async () => {
+    const body = { token, request: "delete_all" };
+    const response = await fetchApiPost<null>(baseUrl, body);
+    if (response.status === 'success') await repository.acknowledgeRemoteDelete();
+    return response;
+  });
 };
 
 
@@ -403,13 +513,4 @@ export const apiUpdateProcedureDoc = async (
     payload: [{ doc_id: docId, timestamp, value }],
   };
   return fetchApiPost<null>(baseUrl, body);
-};
-
-const parseNullableNumber = (value: unknown): number | null => {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value === 'string') {
-    const parsed = parseFloat(value.replace(',', '.'));
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
 };

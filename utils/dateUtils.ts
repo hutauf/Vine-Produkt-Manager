@@ -145,7 +145,6 @@ export const normalizeGermanDateInput = (dateString?: string): string => {
     let yearStr = generalMatch[3];
 
     if (yearStr.length === 2) {
-      const currentYear = new Date().getFullYear();
       const twoDigitYear = parseInt(yearStr, 10);
       // Assuming 'YY' refers to current century, or previous if it results in a future date far off
       // A common simple heuristic: if yy < (currentYear % 100) + 10 (e.g. < 34 for 2024), assume 20yy, else 19yy

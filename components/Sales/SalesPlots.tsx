@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Product } from '../../types';
 import { ComposedChart, ScatterChart, Scatter, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label, ReferenceLine } from 'recharts';
-import { FaChartBar, FaChartLine, FaDollarSign, FaInfoCircle } from 'react-icons/fa';
+import { FaChartBar, FaDollarSign, FaInfoCircle } from 'react-icons/fa';
 import { parseGermanDate } from '../../utils/dateUtils';
 
 interface SalesPlotsProps {
@@ -186,7 +186,7 @@ const SalesPlots: React.FC<SalesPlotsProps> = ({ soldProducts, selectedYear }) =
                 height={36} 
                 wrapperStyle={{ color: '#d1d5db', fontSize: 12, paddingBottom: '10px' }}
                 payload={[
-                    { value: 'Verkaufte Produkte', type: 'scatter', id: 'ID01', color: '#60a5fa' },
+                    { value: 'Verkaufte Produkte', type: 'circle', id: 'ID01', color: '#60a5fa' },
                     { value: `Ø VK/ETV: ${chartData.averageRatio > 0 ? chartData.averageRatio.toFixed(2) : 'N/A (Kein ETV > 0)'}`, type: 'line', id: 'ID02', color: '#fbbf24' }
                 ]}
             />

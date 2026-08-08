@@ -2,11 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../Common/Button';
 import Modal from '../Common/Modal';
-import { FaSave, FaTrashAlt, FaCalendarAlt, FaExclamationTriangle, FaGlobe, FaDatabase } from 'react-icons/fa';
-import { FaKey, FaServer, FaBroom, FaWandMagicSparkles } from 'react-icons/fa6';
+import { FaSave, FaTrashAlt, FaCalendarAlt, FaExclamationTriangle, FaDatabase } from 'react-icons/fa';
+import { FaServer, FaBroom, FaWandMagicSparkles } from 'react-icons/fa6';
 import { EuerSettings } from '../../types'; // Import EuerSettings
 import { convertISOToGerman, convertGermanToISO, getTodayGermanFormat } from '../../utils/dateUtils'; // For date input
 import { DEFAULT_API_BASE_URL } from '../../constants';
+import { ConflictRecord } from '../../utils/syncTypes';
 
 
 interface SettingsPageProps {
@@ -17,8 +18,11 @@ interface SettingsPageProps {
   euerSettings: EuerSettings; 
   onEuerSettingsChange: (settings: EuerSettings) => void; 
   onDeleteAllServerData: () => Promise<void>;
-  onClearLocalDataAndToken: () => void;
+  onClearLocalDataAndToken: () => Promise<void>;
   onBulkFestschreiben: (dateYYYYMMDD: string) => Promise<void>; 
+  syncConflicts: ConflictRecord[];
+  resolvingSyncConflictId: number | null;
+  onResolveSyncConflict: (conflictId: number, resolution: 'server' | 'local') => Promise<void>;
 }
 
 const DEMO_TOKEN = 'f08h2h8923fh48923h4f8923hf89r23f';
@@ -33,6 +37,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   onDeleteAllServerData,
   onClearLocalDataAndToken,
   onBulkFestschreiben,
+  syncConflicts,
+  resolvingSyncConflictId,
+  onResolveSyncConflict,
 }) => {
   const [currentTokenValue, setCurrentTokenValue] = useState(apiToken || '');
   const [currentApiBaseUrlValue, setCurrentApiBaseUrlValue] = useState(apiBaseUrl);
@@ -74,16 +81,22 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
 
   const handleDeleteDataConfirmed = async () => {
     setIsDeletingServerData(true);
-    await onDeleteAllServerData();
-    setIsDeletingServerData(false);
-    setShowDeleteConfirmModal(false);
+    try {
+      await onDeleteAllServerData();
+      setShowDeleteConfirmModal(false);
+    } finally {
+      setIsDeletingServerData(false);
+    }
   };
 
-  const handleClearLocalDataConfirmed = () => {
+  const handleClearLocalDataConfirmed = async () => {
     setIsClearingLocalData(true);
-    onClearLocalDataAndToken();
-    setIsClearingLocalData(false);
-    setShowClearLocalConfirmModal(false);
+    try {
+      await onClearLocalDataAndToken();
+      setShowClearLocalConfirmModal(false);
+    } finally {
+      setIsClearingLocalData(false);
+    }
   };
 
   const handleEuerSettingChange = <K extends keyof EuerSettings>(key: K, value: EuerSettings[K]) => {
@@ -153,6 +166,51 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
            )}
         </div>
       </div>
+
+      {syncConflicts.length > 0 && (
+        <div className="pt-6 border-t border-amber-700/60">
+          <h2 className="text-xl font-semibold text-amber-300 mb-3 flex items-center">
+            <FaExclamationTriangle className="mr-3" /> Synchronisationskonflikte
+          </h2>
+          <p className="text-sm text-gray-300 mb-4">
+            Diese Produkte wurden gleichzeitig lokal und auf dem Server im selben Feld geändert.
+            Andere Produkte werden weiter synchronisiert; für diese Einträge ist eine Entscheidung nötig.
+          </p>
+          <div className="space-y-3">
+            {syncConflicts.map(conflict => (
+              <div
+                key={conflict.id ?? conflict.mutationId}
+                className="rounded-md border border-amber-700 bg-amber-950/30 p-4"
+              >
+                <div className="text-sm text-gray-100 font-medium">
+                  {conflict.entityType === 'product' ? `ASIN ${conflict.entityId}` : conflict.entityId}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Betroffene Felder: {conflict.fields.length > 0 ? conflict.fields.join(', ') : 'Datensatz/Löschung'}
+                  {conflict.serverRecord == null ? ' · Auf dem Server gelöscht' : ''}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <Button
+                    variant="secondary"
+                    onClick={() => conflict.id != null && onResolveSyncConflict(conflict.id, 'server')}
+                    disabled={conflict.id == null || resolvingSyncConflictId != null}
+                    isLoading={resolvingSyncConflictId === conflict.id}
+                  >
+                    Serverstand übernehmen
+                  </Button>
+                  <Button
+                    onClick={() => conflict.id != null && onResolveSyncConflict(conflict.id, 'local')}
+                    disabled={conflict.id == null || resolvingSyncConflictId != null}
+                    isLoading={resolvingSyncConflictId === conflict.id}
+                  >
+                    Lokale Änderung erneut senden
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Allgemeine Produkteinstellungen Section */}
       <div className="pt-6 border-t border-slate-700">

@@ -1,10 +1,10 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { Product, ProductUsage, EuerSettings, BelegSettings, SalesPageProps } from '../../types';
+import { Product, ProductUsage, SalesPageProps } from '../../types';
 import EditProductModal from '../Products/EditProductModal';
 import SalesPlots from '../Sales/SalesPlots'; // Import the new SalesPlots component
 import UsagePieCharts from '../Sales/UsagePieCharts';
-import { FaDollarSign, FaEdit, FaSort, FaSortUp, FaSortDown, FaTimesCircle, FaFilter } from 'react-icons/fa';
+import { FaDollarSign, FaEdit, FaSort, FaSortUp, FaSortDown, FaTimesCircle } from 'react-icons/fa';
 import Button from '../Common/Button';
 import { parseDMYtoDate, parseGermanDate } from '../../utils/dateUtils';
 

@@ -4,8 +4,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+require('fake-indexeddb/auto');
 
 const repositoryRoot = path.resolve(__dirname, '..');
+process.env.NODE_PATH = [
+  path.join(repositoryRoot, 'node_modules'),
+  process.env.NODE_PATH,
+].filter(Boolean).join(path.delimiter);
+require('node:module').Module._initPaths();
 const buildDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'vine-date-contract-'));
 const compiler = path.join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 const compile = spawnSync(process.execPath, [
@@ -64,12 +70,42 @@ test('API serializer contains no fabricated epoch order date', () => {
   assert.match(apiSource, /normalizedOrderDate && \{ date: normalizedOrderDate \}/);
 });
 
+test('invalid raw order dates are removed from updates and ASIN cleanup payloads', () => {
+  const serialized = apiService.productToApiValue({
+    ASIN: 'B012345678',
+    name: 'Invalid date',
+    ordernumber: '1',
+    date: '31/02/2025',
+    etv: 1,
+    teilwert: null,
+    usageStatus: [],
+  });
+  assert.equal(Object.hasOwn(serialized, 'date'), false);
+
+  const canonicalized = apiService.canonicalizeApiProductEntries([{
+    ASIN: 'b012345678',
+    last_update_time: 1,
+    value: JSON.stringify({ name: 'Invalid date', date: 'not-a-date', unknown: true }),
+  }]);
+  const corrected = JSON.parse(canonicalized.corrections[0].value);
+  assert.equal(Object.hasOwn(corrected, 'date'), false);
+  assert.equal(corrected.unknown, true);
+});
+
 test('startup merges raw ASIN case variants and preserves unknown fields', async () => {
   const requests = [];
   const originalFetch = global.fetch;
   global.fetch = async (_url, options) => {
     const body = JSON.parse(options.body);
     requests.push(body);
+    if (body.request === 'get_capabilities_v2') {
+      return {
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ status: 'error', message: 'Unknown request type: get_capabilities_v2' }),
+      };
+    }
     const payload = body.request === 'get_all'
       ? {
           status: 'success',
@@ -116,9 +152,12 @@ test('startup merges raw ASIN case variants and preserves unknown fields', async
     assert.equal(response.data[0].ASIN, 'B012345678');
     assert.equal(response.data[0].name, 'newer');
     assert.equal(response.data[0].date, '04/05/2025');
-    assert.deepEqual(requests.map(request => request.request), ['get_all', 'update_asin']);
+    assert.deepEqual(
+      requests.map(request => request.request),
+      ['get_capabilities_v2', 'get_all', 'update_asin'],
+    );
 
-    const correction = requests[1].payload[0];
+    const correction = requests[2].payload[0];
     const correctedValue = JSON.parse(correction.value);
     assert.equal(correction.ASIN, 'B012345678');
     assert.equal(correction.timestamp, 0);

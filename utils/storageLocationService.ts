@@ -66,14 +66,18 @@ function parseLocation(entry: RawStorageLocationEntry): StorageLocationEntry {
 
 export async function listStorageLocations(baseUrl: string, token: string): Promise<DataOperationResponse<StorageLocationEntry[]>> {
   const result = await postDataOperation<RawStorageLocationEntry[]>(baseUrl, token, 'list_storage_locations');
-  if (result.status !== 'success' || !result.data) return result as DataOperationResponse<StorageLocationEntry[]>;
+  if (result.status !== 'success' || !result.data) {
+    return result as unknown as DataOperationResponse<StorageLocationEntry[]>;
+  }
 
   return { ...result, data: result.data.map(parseLocation) };
 }
 
 export async function getStorageLocationsByIds(baseUrl: string, token: string, locationIds: string[]): Promise<DataOperationResponse<StorageLocationEntry[]>> {
   const result = await postDataOperation<RawStorageLocationEntry[]>(baseUrl, token, 'get_storage_location', locationIds);
-  if (result.status !== 'success' || !result.data) return result as DataOperationResponse<StorageLocationEntry[]>;
+  if (result.status !== 'success' || !result.data) {
+    return result as unknown as DataOperationResponse<StorageLocationEntry[]>;
+  }
 
   return { ...result, data: result.data.map(parseLocation) };
 }

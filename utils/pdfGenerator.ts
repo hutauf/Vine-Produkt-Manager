@@ -56,11 +56,10 @@ const generateMainPdfBytesFromText = (
   const margin = 15; // mm
   const initialLineHeight = isBulkBeleg ? 5 : 7; // Smaller line height for potentially longer bulk belegs
   
-  const pageHeight = doc.internal.pageSize.height;
   const pageWidth = doc.internal.pageSize.width;
   const usableWidth = pageWidth - margin * 2;
 
-  const { incrementY, getY, setY, setLineHeight } = createYIncrementer(doc, margin, initialLineHeight);
+  const { incrementY, getY, setLineHeight } = createYIncrementer(doc, margin, initialLineHeight);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
@@ -100,7 +99,7 @@ const generateMainPdfBytesFromText = (
     }
     
     doc.setFontSize(currentFontSize);
-    doc.setFont(undefined, currentFontWeight);
+    doc.setFont('helvetica', currentFontWeight);
     
     // Adjust line height based on font size (approx)
     const dynamicLineHeight = currentFontSize * 0.35 * (isProductListItem ? 1.2 : 1.8) ; // Slightly more compact for list items
@@ -111,7 +110,7 @@ const generateMainPdfBytesFromText = (
     if (isAmountLine && value) {
         doc.text(splitLabelLines, margin, getY());
         
-        doc.setFont(undefined, 'bold'); // Value part also bold for amounts
+        doc.setFont('helvetica', 'bold'); // Value part also bold for amounts
         const valueWidth = doc.getTextWidth(value);
         const yForValue = getY() + (splitLabelLines.length > 1 ? (splitLabelLines.length -1) * dynamicLineHeight * 0.8 : 0);
         doc.text(value, pageWidth - margin - valueWidth, yForValue); 

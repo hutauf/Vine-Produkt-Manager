@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Product, ProductUsage, EuerSettings, BelegSettings } from '../../types'; // Added EuerSettings, BelegSettings
+import { Product, EuerSettings, BelegSettings } from '../../types'; // Added EuerSettings, BelegSettings
 import EditProductModal from './EditProductModal';
 import { FaSort, FaSortUp, FaSortDown, FaEdit, FaAngleLeft, FaAngleRight, FaAngleDoubleLeft, FaAngleDoubleRight } from 'react-icons/fa';
 import Button from '../Common/Button';

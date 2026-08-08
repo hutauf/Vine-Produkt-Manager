@@ -85,7 +85,7 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
             (decodedText) => {
               handleDetectRef.current(decodedText);
             },
-            (error) => {} // ignore
+            () => {} // ignore decode misses
           ).catch((err) => {
             console.error('Failed to start scanner', err);
           });
@@ -99,9 +99,9 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({ title, helpText, onDetected
       
       try {
         html5QrCode.stop().then(() => {
-          try { html5QrCode.clear(); } catch (e) {}
-        }).catch(e => {
-          try { html5QrCode.clear(); } catch (err) {}
+          try { html5QrCode.clear(); } catch {}
+        }).catch(() => {
+          try { html5QrCode.clear(); } catch {}
         });
       } catch (err) {
         console.warn('Sync error stopping scanner', err);
