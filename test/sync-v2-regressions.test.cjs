@@ -69,6 +69,62 @@ const jsonResponse = payload => ({
   json: async () => payload,
 });
 
+test('V2 mutations keep canonical and legacy compatibility fields in sync', async () => {
+  const repository = await database.openProductRepository('https://example.test/sync', 'token');
+  const asin = 'B000000071';
+  const rawServerValue = {
+    name: 'Compatibility fields',
+    ordernumber: 'ORDER-71',
+    date: '01/01/2025',
+    etv: 10,
+    teilwert: null,
+    teilwert_v2: null,
+    usageStatus: ['verkauft'],
+    verkauft: true,
+    myTeilwert: 5,
+    myteilwert: 5,
+  };
+  await repository.replaceSnapshot([{
+    entity_type: 'product',
+    entity_id: asin,
+    record_revision: 4,
+    legacy_last_update_time: 10,
+    data: rawServerValue,
+  }]);
+
+  const base = (await repository.getProducts())[0];
+  const edited = {
+    ...base,
+    usageStatus: [],
+    myTeilwert: 9,
+    // These stale fields model the value left behind by the old V2 writer.
+    verkauft: true,
+    myteilwert: 5,
+  };
+  const mutation = await repository.queueProduct(edited, base);
+
+  assert.ok(mutation);
+  assert.deepEqual(mutation.set.usageStatus, []);
+  assert.equal(mutation.set.verkauft, false);
+  assert.equal(mutation.set.myTeilwert, 9);
+  assert.equal(mutation.set.myteilwert, 9);
+  assert.equal(mutation.unset.includes('verkauft'), false);
+  assert.equal(mutation.unset.includes('myteilwert'), false);
+
+  const [local] = await repository.getProducts();
+  assert.deepEqual(local.usageStatus, []);
+  assert.equal(local.verkauft, false);
+  assert.equal(local.myTeilwert, 9);
+  assert.equal(local.myteilwert, 9);
+
+  const shadow = await database.syncDatabase.shadows.get([
+    repository.profile.id,
+    'product',
+    asin,
+  ]);
+  assert.deepEqual(shadow.value, rawServerValue);
+});
+
 test('an unattempted A-to-B mutation disappears when the user reverts to A', async () => {
   const repository = await database.openProductRepository('https://example.test/sync', 'token');
   const server = product('B000000001', 'A', 10, { unknownServerField: 'kept' });

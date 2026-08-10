@@ -1,7 +1,10 @@
 import Dexie, { Table } from 'dexie';
 import { Product } from '../types';
 import { canonicalizeJson, canonicalRequestHash } from './syncCanonical';
-import { normalizeSyncedProduct } from './syncProductCompatibility';
+import {
+  normalizeSyncedProduct,
+  serializeCompatibilityFields,
+} from './syncProductCompatibility';
 import {
   ConflictRecord,
   JsonObject,
@@ -74,6 +77,25 @@ const jsonFieldsEqual = (left: JsonObject, right: JsonObject, key: string): bool
     && (!leftHas || canonicalizeJson(left[key]) === canonicalizeJson(right[key]));
 };
 
+const COMPATIBILITY_FIELDS = [
+  'usageStatus',
+  'myTeilwert',
+  'myteilwert',
+  'verkauft',
+  'lager',
+  'entsorgt',
+  'storniert',
+  'betriebsausgabe',
+];
+
+const hasOwn = (value: object, field: PropertyKey): boolean => (
+  Object.prototype.hasOwnProperty.call(value, field)
+);
+
+const compatibilityFieldsDiffer = (left: JsonObject, right: JsonObject): boolean => (
+  COMPATIBILITY_FIELDS.some(field => hasOwn(right, field) && !jsonFieldsEqual(left, right, field))
+);
+
 interface LocalIntent {
   operation: 'patch' | 'delete';
   set: JsonObject;
@@ -144,7 +166,7 @@ export const canonicalizeAsin = (value: unknown): string | null => {
   return /^[A-Z0-9]{10}$/.test(normalized) ? normalized : null;
 };
 
-export const productToStoredValue = (product: Product): JsonObject => {
+const productToRawStoredValue = (product: Product): JsonObject => {
   const value: JsonObject = {};
   Object.entries(product as Product & JsonObject).forEach(([key, fieldValue]) => {
     if (key === 'ASIN' || key === 'last_update_time' || fieldValue === undefined) return;
@@ -153,11 +175,21 @@ export const productToStoredValue = (product: Product): JsonObject => {
   return value;
 };
 
+export const productToStoredValue = (product: Product): JsonObject => (
+  productToRawStoredValue(product)
+);
+
 export const storedProductToProduct = (record: StoredProductRecord): Product => ({
   ...cloneJson(record.value),
   ASIN: record.asin,
   last_update_time: record.legacyLastUpdateTime,
 } as Product);
+
+export interface V1ProductSettlement {
+  asin: string;
+  accepted: boolean;
+  serverProduct?: Product;
+}
 
 const normalizeServerProductValue = (
   asin: string,
@@ -423,7 +455,7 @@ export class ProductSyncRepository {
               .filter(conflict => conflict.resolvedAt == null)
               .map(conflict => conflict.createdAt + 1),
           );
-          const incoming = productToStoredValue(product);
+          const incomingRaw = productToStoredValue(product);
           const rawIncomingTimestamp = Number(product.last_update_time);
           const previousTimestamp = existing?.legacyLastUpdateTime ?? 0;
           const incomingTimestamp = Number.isFinite(rawIncomingTimestamp)
@@ -433,11 +465,14 @@ export class ProductSyncRepository {
           const uiBaseProduct = canonicalizeAsin(candidateBase?.ASIN) === asin
             ? candidateBase
             : undefined;
+          const currentValue = existing?.value ?? (shadow?.deleted ? {} : (shadow?.value ?? {}));
+          const incoming = !shadow || shadow.deleted || compatibilityFieldsDiffer(currentValue, incomingRaw)
+            ? serializeCompatibilityFields(incomingRaw)
+            : incomingRaw;
           let desired = incoming;
           if (uiBaseProduct) {
-            const uiDiff = diffJsonObjects(productToStoredValue(uiBaseProduct), incoming);
             const uiBaseValue = productToStoredValue(uiBaseProduct);
-            const currentValue = existing?.value ?? (shadow?.deleted ? {} : (shadow?.value ?? {}));
+            const uiDiff = diffJsonObjects(uiBaseValue, incoming);
             desired = applyPatch(
               currentValue,
               uiDiff.set,
@@ -765,37 +800,56 @@ export class ProductSyncRepository {
     });
   }
 
-  async acknowledgeV1Products(sentProducts: Product[], mutationIds: string[]): Promise<void> {
+  async settleV1Products(
+    sentProducts: Product[],
+    mutationIds: string[],
+    settlements: V1ProductSettlement[],
+  ): Promise<void> {
     const sentByAsin = new Map(sentProducts.map(product => [
       canonicalizeAsin(product.ASIN),
       product,
     ]));
+    const settlementByAsin = new Map(
+      settlements
+        .map(settlement => {
+          const asin = canonicalizeAsin(settlement.asin);
+          return asin ? [asin, { ...settlement, asin }] as const : null;
+        })
+        .filter((entry): entry is readonly [string, V1ProductSettlement] => entry != null),
+    );
     const acknowledgedIds = new Set(mutationIds);
     await syncDatabase.transaction(
       'rw',
       [syncDatabase.outbox, syncDatabase.shadows, syncDatabase.products, syncDatabase.conflicts],
       async () => {
       const records = await syncDatabase.outbox.where('profileId').equals(this.profile.id).toArray();
-      await syncDatabase.outbox.bulkDelete(records
-        .filter(record => acknowledgedIds.has(record.mutationId))
+      const settledRequestRecords = records.filter(record => (
+        record.entityType === 'product'
+        && acknowledgedIds.has(record.mutationId)
+        && settlementByAsin.has(record.entityId)
+      ));
+      await syncDatabase.outbox.bulkDelete(settledRequestRecords
         .map(record => record.id)
         .filter((id): id is number => id != null));
       for (const [asin, sentProduct] of sentByAsin) {
         if (!asin) continue;
-        const requestRecordsForAsin = records.filter(record => (
-          record.entityType === 'product'
-          && record.entityId === asin
-          && acknowledgedIds.has(record.mutationId)
-        ));
+        const settlement = settlementByAsin.get(asin);
+        if (!settlement) continue;
+        const requestRecordsForAsin = settledRequestRecords.filter(record => record.entityId === asin);
         if (requestRecordsForAsin.length === 0) continue;
-        const sentValue = productToStoredValue(sentProduct);
+        const serverDeleted = !settlement.accepted && !settlement.serverProduct;
+        const serverValue = settlement.accepted
+          ? serializeCompatibilityFields(productToStoredValue(sentProduct))
+          : settlement.serverProduct
+            ? productToStoredValue(settlement.serverProduct)
+            : {};
         await syncDatabase.shadows.put({
           profileId: this.profile.id,
           entityType: 'product',
           entityId: asin,
-          value: cloneJson(sentValue),
+          value: cloneJson(serverValue),
           recordRevision: 0,
-          deleted: 0,
+          deleted: serverDeleted ? 1 : 0,
         });
         const later = records
           .filter(record => (
@@ -812,27 +866,44 @@ export class ProductSyncRepository {
         for (const conflict of conflicts) {
           if (conflict.id != null) {
             await syncDatabase.conflicts.update(conflict.id, {
-              serverRecord: cloneJson(sentValue),
+              serverRecord: serverDeleted ? null : cloneJson(serverValue),
               serverRecordRevision: 0,
             });
           }
         }
-        const local = overlayLocalIntents(sentValue, false, conflicts, later);
+        const local = overlayLocalIntents(serverValue, serverDeleted, conflicts, later);
         const current = await syncDatabase.products.get([this.profile.id, asin]);
+        const serverTimestamp = Number(settlement.serverProduct?.last_update_time) || 0;
+        const legacyLastUpdateTime = settlement.accepted
+          ? Math.max(
+              Number(sentProduct.last_update_time) || 0,
+              current?.legacyLastUpdateTime ?? 0,
+            )
+          : later.length > 0 || conflicts.length > 0
+            ? Math.max(serverTimestamp, current?.legacyLastUpdateTime ?? 0)
+            : serverTimestamp || current?.legacyLastUpdateTime || 0;
         await syncDatabase.products.put({
           profileId: this.profile.id,
           asin,
           value: local.value,
-          legacyLastUpdateTime: Math.max(
-            Number(sentProduct.last_update_time) || 0,
-            current?.legacyLastUpdateTime ?? 0,
-          ),
+          legacyLastUpdateTime,
           recordRevision: 0,
           deleted: local.deleted ? 1 : 0,
           updatedAt: Date.now(),
         });
       }
     });
+  }
+
+  async acknowledgeV1Products(sentProducts: Product[], mutationIds: string[]): Promise<void> {
+    await this.settleV1Products(
+      sentProducts,
+      mutationIds,
+      sentProducts.map(product => ({
+        asin: product.ASIN,
+        accepted: true,
+      })),
+    );
   }
 
   async applyV1ServerProducts(serverProducts: Product[]): Promise<Product[]> {

@@ -2,10 +2,15 @@
 import { Product, ProductHistoryEntry, ProductUsage } from '../types';
 import { normalizeDateString } from './dateUtils'; // Import the new utility
 import {
-  usageStatusToLegacyFlags,
-} from './productCompatibility';
-import { normalizeSyncedProduct } from './syncProductCompatibility';
-import { openProductRepository } from './syncDatabase';
+  normalizeSyncedProduct,
+  serializeCompatibilityFields,
+} from './syncProductCompatibility';
+import {
+  canonicalizeAsin,
+  openProductRepository,
+  type V1ProductSettlement,
+} from './syncDatabase';
+import { canonicalizeJson } from './syncCanonical';
 import {
   detectSyncProtocol,
   queueProductsForSync,
@@ -134,28 +139,29 @@ Original error: ${error.message}`;
 // Function to convert Product to ProductApiValue (for stringification to main DB)
 export const productToApiValue = (product: Product): ProductApiValue => {
   const { ASIN, last_update_time, ...apiValueFields } = product;
-  const usageStatus = Array.isArray(apiValueFields.usageStatus) ? apiValueFields.usageStatus : [];
-  const legacyUsageFlags = usageStatusToLegacyFlags(usageStatus);
+  const serializedCompatibilityFields = serializeCompatibilityFields(
+    apiValueFields as unknown as Record<string, unknown>,
+  );
   const normalizedOrderDate = normalizeDateString(
     apiValueFields.date,
     'order date for API update',
     ASIN,
   );
   const apiValue: ProductApiValue = {
-    ...apiValueFields,
+    ...serializedCompatibilityFields,
     name: apiValueFields.name,
     ordernumber: apiValueFields.ordernumber,
     ...(normalizedOrderDate && { date: normalizedOrderDate }),
     etv: apiValueFields.etv,
     teilwert: apiValueFields.teilwert,
     ...(apiValueFields.teilwert_v2 !== undefined && { teilwert_v2: apiValueFields.teilwert_v2 }),
-    usageStatus,
+    usageStatus: Array.isArray(serializedCompatibilityFields.usageStatus)
+      ? serializedCompatibilityFields.usageStatus as ProductUsage[]
+      : [],
     ...(apiValueFields.keepa !== undefined && { keepa: apiValueFields.keepa }),
     ...(apiValueFields.pdf !== undefined && { pdf: apiValueFields.pdf }),
     ...(apiValueFields.myTeilwert !== undefined && { myTeilwert: apiValueFields.myTeilwert }),
-    ...(apiValueFields.myTeilwert !== undefined && { myteilwert: apiValueFields.myTeilwert }),
     ...(apiValueFields.myTeilwertReason !== undefined && { myTeilwertReason: apiValueFields.myTeilwertReason }),
-    ...legacyUsageFlags,
     ...(apiValueFields.salePrice !== undefined && { salePrice: apiValueFields.salePrice }),
     ...(apiValueFields.saleDate !== undefined && { saleDate: apiValueFields.saleDate }),
     ...(apiValueFields.buyerAddress !== undefined && { buyerAddress: apiValueFields.buyerAddress }),
@@ -269,6 +275,69 @@ export const apiEntryToProduct = (apiEntry: ApiProductEntry): Product => {
       etv: 0, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: apiEntry.last_update_time || 0,
     };
   }
+};
+
+const verifyV1Batch = async (
+  baseUrl: string,
+  token: string,
+  sentProducts: Product[],
+): Promise<V1ProductSettlement[]> => {
+  const requestedAsins = [...new Set(sentProducts.map(product => canonicalizeAsin(product.ASIN)))]
+    .filter((asin): asin is string => !!asin);
+  const response = await fetchApiPost<ApiProductEntry[]>(baseUrl, {
+    token,
+    request: 'get_asin',
+    payload: requestedAsins,
+  });
+  if (response.status !== 'success') {
+    throw new Error(response.message || 'Der V1-Serverzustand konnte nicht verifiziert werden.');
+  }
+  if (!Array.isArray(response.data)) {
+    throw new Error('Der V1-Server lieferte für get_asin keine gültige Produktliste.');
+  }
+
+  const serverByAsin = new Map<string, { entry: ApiProductEntry; value: RawProductValue }>();
+  for (const rawEntry of response.data) {
+    const asin = canonicalizeAsin(rawEntry?.ASIN);
+    if (
+      !asin
+      || typeof rawEntry.value !== 'string'
+      || typeof rawEntry.last_update_time !== 'number'
+      || !Number.isSafeInteger(rawEntry.last_update_time)
+      || rawEntry.last_update_time < 0
+    ) {
+      throw new Error('Der V1-Server lieferte einen ungültigen get_asin-Eintrag.');
+    }
+    let parsedValue: unknown;
+    try {
+      parsedValue = JSON.parse(rawEntry.value);
+    } catch {
+      throw new Error(`Der V1-Server lieferte ungültiges JSON für ${asin}.`);
+    }
+    if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
+      throw new Error(`Der V1-Server lieferte keinen Produktdatensatz für ${asin}.`);
+    }
+    if (serverByAsin.has(asin)) {
+      throw new Error(`Der V1-Server lieferte den ASIN ${asin} mehrfach zurück.`);
+    }
+    serverByAsin.set(asin, {
+      entry: { ...rawEntry, ASIN: asin },
+      value: parsedValue as RawProductValue,
+    });
+  }
+
+  return sentProducts.map(product => {
+    const asin = canonicalizeAsin(product.ASIN);
+    if (!asin) throw new Error(`Ungültige ASIN im V1-Request: ${product.ASIN}`);
+    const serverEntry = serverByAsin.get(asin);
+    const accepted = !!serverEntry
+      && canonicalizeJson(serverEntry.value) === canonicalizeJson(productToApiValue(product));
+    return {
+      asin,
+      accepted,
+      serverProduct: serverEntry ? apiEntryToProduct(serverEntry.entry) : undefined,
+    };
+  });
 };
 
 
@@ -429,6 +498,21 @@ export const apiUpdateProducts = async (
       const serverSkipped = response.skipped ?? 0;
       if (serverSkipped === 0) {
         await repository.acknowledgeV1Products(productsForV1, preparedV1.mutationIds);
+      } else {
+        try {
+          const settlements = await verifyV1Batch(baseUrl, token, productsForV1);
+          await repository.settleV1Products(
+            productsForV1,
+            preparedV1.mutationIds,
+            settlements,
+          );
+        } catch (verificationError) {
+          response.status = 'error';
+          response.message = [
+            'V1-Upload wurde ausgeführt, konnte aber nicht sicher bestätigt werden; die Outbox bleibt erhalten.',
+            verificationError instanceof Error ? verificationError.message : String(verificationError),
+          ].join(' ');
+        }
       }
       response.skipped = serverSkipped + blockedByConflict;
       response.syncProtocol = 'v1';

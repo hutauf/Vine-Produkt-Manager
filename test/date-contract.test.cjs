@@ -92,6 +92,26 @@ test('invalid raw order dates are removed from updates and ASIN cleanup payloads
   assert.equal(corrected.unknown, true);
 });
 
+test('API serializer updates canonical and legacy compatibility fields together', () => {
+  const serialized = apiService.productToApiValue({
+    ASIN: 'B012345678',
+    name: 'Compatibility fields',
+    ordernumber: '1',
+    date: '01/01/2025',
+    etv: 1,
+    teilwert: null,
+    usageStatus: [],
+    myTeilwert: 9,
+    myteilwert: 5,
+    verkauft: true,
+  });
+
+  assert.deepEqual(serialized.usageStatus, []);
+  assert.equal(serialized.verkauft, false);
+  assert.equal(serialized.myTeilwert, 9);
+  assert.equal(serialized.myteilwert, 9);
+});
+
 test('startup merges raw ASIN case variants and preserves unknown fields', async () => {
   const requests = [];
   const originalFetch = global.fetch;

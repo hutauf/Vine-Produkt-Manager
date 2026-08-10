@@ -916,6 +916,182 @@ test('a V1 acknowledgement removes only mutations included in its request snapsh
   }
 });
 
+test('a partially accepted V1 batch settles accepted and stale products independently', async () => {
+  const originalFetch = global.fetch;
+  const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
+  const acceptedAsin = 'B012345678';
+  const staleAsin = 'B087654321';
+  const acceptedServer = {
+    ASIN: acceptedAsin, name: 'Accepted server value', ordernumber: '1', date: '01/01/2025',
+    etv: 1, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: 10,
+  };
+  const staleServer = {
+    ASIN: staleAsin, name: 'Newer server value', ordernumber: '2', date: '02/01/2025',
+    etv: 2, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: 30,
+  };
+  await repository.applyV1ServerProducts([acceptedServer, staleServer]);
+  const bases = new Map((await repository.getProducts()).map(product => [product.ASIN, product]));
+  const updates = [];
+  const requests = [];
+  let acceptedEntry;
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body.request);
+    if (body.request === 'get_capabilities_v2') {
+      return jsonResponse({
+        status: 'error',
+        message: 'Unknown request type: get_capabilities_v2',
+      }, 400);
+    }
+    if (body.request === 'update_asin') {
+      updates.push(body.payload);
+      acceptedEntry = body.payload.find(entry => entry.ASIN === acceptedAsin);
+      return jsonResponse({ status: 'success', inserted: 0, updated: 1, skipped: 1 });
+    }
+    if (body.request === 'get_asin') {
+      return jsonResponse({
+        status: 'success',
+        data: [
+          {
+            ASIN: acceptedAsin,
+            last_update_time: acceptedEntry.timestamp,
+            value: acceptedEntry.value,
+          },
+          {
+            ASIN: staleAsin,
+            last_update_time: staleServer.last_update_time,
+            value: JSON.stringify(apiService.productToApiValue(staleServer)),
+          },
+        ],
+      });
+    }
+    throw new Error(`Unexpected request ${body.request}`);
+  };
+
+  try {
+    const response = await apiService.apiUpdateProducts(
+      'https://example.test/data_operations',
+      'token',
+      [
+        { ...bases.get(acceptedAsin), name: 'Accepted local value', last_update_time: 20 },
+        { ...bases.get(staleAsin), name: 'Stale local value', last_update_time: 20 },
+      ],
+      [bases.get(acceptedAsin), bases.get(staleAsin)],
+    );
+
+    assert.equal(response.status, 'success', response.message);
+    assert.equal(response.skipped, 1);
+    assert.deepEqual(requests, ['get_capabilities_v2', 'update_asin', 'get_asin']);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].length, 2);
+    assert.equal((await repository.getOutbox()).length, 0);
+
+    const products = new Map((await repository.getProducts()).map(product => [product.ASIN, product]));
+    assert.equal(products.get(acceptedAsin).name, 'Accepted local value');
+    assert.equal(products.get(staleAsin).name, 'Newer server value');
+    assert.equal(products.get(staleAsin).last_update_time, staleServer.last_update_time);
+
+    const staleShadow = await database.syncDatabase.shadows.get([
+      repository.profile.id,
+      'product',
+      staleAsin,
+    ]);
+    assert.equal(staleShadow.value.name, 'Newer server value');
+    assert.equal(staleShadow.value.ordernumber, staleServer.ordernumber);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('a V1 partial-batch readback failure keeps the request snapshot retryable', async () => {
+  const originalFetch = global.fetch;
+  const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
+  const serverProduct = {
+    ASIN: 'B012345678', name: 'Server value', ordernumber: '1', date: '01/01/2025',
+    etv: 1, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: 10,
+  };
+  await repository.applyV1ServerProducts([serverProduct]);
+  const base = (await repository.getProducts())[0];
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body.request);
+    if (body.request === 'get_capabilities_v2') {
+      return jsonResponse({
+        status: 'error',
+        message: 'Unknown request type: get_capabilities_v2',
+      }, 400);
+    }
+    if (body.request === 'update_asin') {
+      return jsonResponse({ status: 'success', inserted: 0, updated: 0, skipped: 1 });
+    }
+    if (body.request === 'get_asin') {
+      return jsonResponse({ status: 'error', message: 'temporary readback failure' }, 503);
+    }
+    throw new Error(`Unexpected request ${body.request}`);
+  };
+
+  try {
+    const response = await apiService.apiUpdateSingleProduct(
+      'https://example.test/data_operations',
+      'token',
+      { ...base, name: 'Local value', last_update_time: 20 },
+      base,
+    );
+
+    assert.equal(response.status, 'error');
+    assert.match(response.message, /Outbox bleibt erhalten/);
+    assert.deepEqual(requests, ['get_capabilities_v2', 'update_asin', 'get_asin']);
+    assert.equal((await repository.getOutbox()).length, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('a V1 server-win settlement preserves a later local mutation', async () => {
+  const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
+  const asin = 'B012345678';
+  const originalServer = {
+    ASIN: asin, name: 'Original server value', ordernumber: '1', date: '01/01/2025',
+    etv: 1, teilwert: null, teilwert_v2: null, usageStatus: [], last_update_time: 10,
+  };
+  const newerServer = {
+    ...originalServer,
+    name: 'Newer server value',
+    last_update_time: 30,
+  };
+  await repository.applyV1ServerProducts([originalServer]);
+  const base = (await repository.getProducts())[0];
+  await repository.queueProduct({ ...base, name: 'Stale local value', last_update_time: 20 }, base);
+  const request = await repository.prepareV1Upload([asin]);
+  const current = (await repository.getProducts())[0];
+  await repository.queueProduct(
+    { ...current, ordernumber: 'Later local edit', last_update_time: 40 },
+    current,
+  );
+
+  await repository.settleV1Products(
+    request.products,
+    request.mutationIds,
+    [{ asin, accepted: false, serverProduct: newerServer }],
+  );
+
+  const remaining = await repository.getOutbox();
+  assert.equal(remaining.length, 1);
+  assert.deepEqual(remaining[0].set, { ordernumber: 'Later local edit' });
+  const [product] = await repository.getProducts();
+  assert.equal(product.name, 'Newer server value');
+  assert.equal(product.ordernumber, 'Later local edit');
+  const shadow = await database.syncDatabase.shadows.get([
+    repository.profile.id,
+    'product',
+    asin,
+  ]);
+  assert.equal(shadow.value.name, 'Newer server value');
+});
+
 test('a late V1 acknowledgement cannot roll back a newer acknowledged request', async () => {
   const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
   const serverProduct = {

@@ -1,6 +1,10 @@
-import { Product } from '../types';
+import { Product, ProductUsage } from '../types';
 import { normalizeDateString } from './dateUtils';
-import { applyLegacyUsageFlags, getPreferredMyTeilwert } from './productCompatibility';
+import {
+  applyLegacyUsageFlags,
+  getPreferredMyTeilwert,
+  usageStatusToLegacyFlags,
+} from './productCompatibility';
 import { JsonObject } from './syncTypes';
 
 const parseNullableNumber = (value: unknown): number | null => {
@@ -10,6 +14,36 @@ const parseNullableNumber = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const hasOwn = (value: object, field: PropertyKey): boolean => (
+  Object.prototype.hasOwnProperty.call(value, field)
+);
+
+/**
+ * Serialize the compatibility fields used by both the V1 and V2 write paths.
+ *
+ * The returned object keeps unknown fields, but the known dual representations
+ * are made consistent from the canonical V2 values. This helper is for local
+ * outbound values only; raw V2 server records must remain untouched so their
+ * dataset hash stays byte-for-byte compatible with the server.
+ */
+export const serializeCompatibilityFields = (fields: JsonObject): JsonObject => {
+  const serialized = { ...fields };
+  const usageStatus = Array.isArray(fields.usageStatus)
+    ? [...fields.usageStatus] as ProductUsage[]
+    : [];
+
+  serialized.usageStatus = usageStatus;
+  Object.assign(serialized, usageStatusToLegacyFlags(usageStatus));
+
+  if (hasOwn(fields, 'myTeilwert')) {
+    serialized.myteilwert = fields.myTeilwert;
+  } else if (hasOwn(fields, 'myteilwert')) {
+    serialized.myTeilwert = fields.myteilwert;
+  }
+
+  return serialized;
 };
 
 /**
