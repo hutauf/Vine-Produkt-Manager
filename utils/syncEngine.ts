@@ -13,12 +13,18 @@ import {
   SyncRunResult,
   V2Capabilities,
   V2Mutation,
+  V2PullData,
+  V2PushData,
   V2SnapshotRecord,
 } from './syncTypes';
 
-const CLIENT_VERSION = '2.0.0';
+const CLIENT_VERSION = '2.1.0';
 const SUPPORTED_CANONICALIZATION = 'jcs-rfc8785-v1';
 const profileSyncLocks = new Map<string, Promise<void>>();
+const integritySnapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const AUTHORITATIVE_STATUS_FIELDS = new Set([
+  'usageStatus', 'verkauft', 'lager', 'entsorgt', 'storniert', 'betriebsausgabe',
+]);
 
 interface BrowserLockManager {
   request<T>(
@@ -42,15 +48,31 @@ interface SnapshotLoadResult {
   integrityRepaired?: boolean;
 }
 
-const mutationFromOutbox = (record: OutboxRecord): V2Mutation => ({
-  mutation_id: record.mutationId,
-  client_id: record.clientId,
-  entity_type: record.entityType,
-  entity_id: record.entityId,
-  base_revision: record.baseRevision,
-  operation: record.operation,
-  ...(record.operation === 'patch' ? { set: record.set, unset: record.unset } : {}),
-});
+const mutationFromOutbox = (
+  record: OutboxRecord,
+  supportsAuthoritativeStatus: boolean,
+): V2Mutation => {
+  const authoritativeFields = supportsAuthoritativeStatus
+    && record.entityType === 'product'
+    && record.operation === 'patch'
+    ? [...new Set([...Object.keys(record.set), ...record.unset])]
+      .filter(field => AUTHORITATIVE_STATUS_FIELDS.has(field))
+    : [];
+  return {
+    mutation_id: record.mutationId,
+    client_id: record.clientId,
+    entity_type: record.entityType,
+    entity_id: record.entityId,
+    base_revision: record.baseRevision,
+    operation: record.operation,
+    intent_age_ms: Math.max(0, Date.now() - record.createdAt),
+    ...(record.operation === 'patch' ? {
+      set: record.set,
+      unset: record.unset,
+      ...(authoritativeFields.length > 0 ? { authoritative_fields: authoritativeFields } : {}),
+    } : {}),
+  };
+};
 
 const requiresSnapshot = (error: unknown): boolean => (
   error instanceof SyncProtocolError
@@ -136,9 +158,12 @@ const loadSnapshotOnce = async (
   const generationChangedDuringSnapshot = Boolean(
     expectedGenerationId && finalGeneration !== expectedGenerationId,
   );
+  if (generationChangedDuringSnapshot) {
+    await repository.discardAllLocalIntents();
+  }
   await repository.replaceSnapshot(
     records,
-    quarantineOutboxForGenerationReset || generationChangedDuringSnapshot,
+    quarantineOutboxForGenerationReset && !generationChangedDuringSnapshot,
     preserveLegacyBootstrapIntent && !generationChangedDuringSnapshot,
   );
   await repository.rebasePendingProductMutations();
@@ -152,6 +177,7 @@ const loadSnapshotOnce = async (
     datasetHash,
     snapshotRequired: false,
     lastError: null,
+    lastIntegritySnapshotAt: Date.now(),
   });
   return { generationId: finalGeneration, revision, datasetHash, count: records.length };
 };
@@ -209,6 +235,58 @@ const loadSnapshot = async (
   }
 };
 
+const applyPullPage = async (
+  repository: ProductSyncRepository,
+  response: V2PullData,
+  generationId: string,
+  previousCursor: number,
+): Promise<{ pulled: number; hash: string | null; hasMore: boolean }> => {
+  if (response.generation_id !== generationId) {
+    throw new SyncProtocolError(
+      'Der Server wechselte die Datensatz-Generation während des Pulls.',
+      409,
+      'generation_mismatch',
+      true,
+    );
+  }
+  if (
+    !Number.isSafeInteger(response.next_cursor)
+    || response.next_cursor < 0
+    || response.next_cursor < previousCursor
+    || (response.has_more && response.next_cursor <= previousCursor)
+  ) {
+    throw new SyncProtocolError(
+      'Der Server lieferte beim inkrementellen Pull keinen gültigen Cursor-Fortschritt.',
+      409,
+      'cursor_ahead',
+      true,
+    );
+  }
+  if (response.changes.some(change => change.operation === 'dataset_reset')) {
+    throw new SyncProtocolError(
+      'Der Server-Datensatz wurde zurückgesetzt; ein neuer Snapshot ist erforderlich.',
+      409,
+      'generation_mismatch',
+      true,
+    );
+  }
+  for (const change of response.changes) await repository.applyChange(change);
+  const state = await repository.getSyncState();
+  await repository.updateSyncState({
+    protocol: 'v2',
+    generationId: response.generation_id,
+    cursor: response.next_cursor,
+    minAvailableRevision: response.min_available_revision,
+    datasetHash: response.dataset_hash ?? state.datasetHash,
+    snapshotRequired: false,
+  });
+  return {
+    pulled: response.changes.length,
+    hash: response.dataset_hash,
+    hasMore: response.has_more,
+  };
+};
+
 const pullUntilCurrent = async (
   repository: ProductSyncRepository,
   baseUrl: string,
@@ -227,47 +305,11 @@ const pullUntilCurrent = async (
       state.cursor,
       capabilities.limits?.pull_changes ?? capabilities.limits?.max_pull_limit,
     );
-    if (response.generation_id !== generationId) {
-      throw new SyncProtocolError(
-        'Der Server wechselte die Datensatz-Generation während des Pulls.',
-        409,
-        'generation_mismatch',
-        true,
-      );
-    }
-    if (
-      !Number.isSafeInteger(response.next_cursor)
-      || response.next_cursor < 0
-      || response.next_cursor < state.cursor
-      || (response.has_more && response.next_cursor <= state.cursor)
-    ) {
-      throw new SyncProtocolError(
-        'Der Server lieferte beim inkrementellen Pull keinen gültigen Cursor-Fortschritt.',
-        409,
-        'cursor_ahead',
-        true,
-      );
-    }
-    if (response.changes.some(change => change.operation === 'dataset_reset')) {
-      throw new SyncProtocolError(
-        'Der Server-Datensatz wurde zurueckgesetzt; ein neuer Snapshot ist erforderlich.',
-        409,
-        'generation_mismatch',
-        true,
-      );
-    }
-    for (const change of response.changes) await repository.applyChange(change);
-    pulled += response.changes.length;
-    state = await repository.updateSyncState({
-      protocol: 'v2',
-      generationId: response.generation_id,
-      cursor: response.next_cursor,
-      minAvailableRevision: response.min_available_revision,
-      datasetHash: response.dataset_hash ?? state.datasetHash,
-      snapshotRequired: false,
-    });
-    if (!response.has_more) {
-      finalHash = response.dataset_hash;
+    const applied = await applyPullPage(repository, response, generationId, state.cursor);
+    pulled += applied.pulled;
+    state = await repository.getSyncState();
+    if (!applied.hasMore) {
+      finalHash = applied.hash;
       break;
     }
   }
@@ -279,8 +321,20 @@ export const pushOutbox = async (
   baseUrl: string,
   token: string,
   capabilities: V2Capabilities,
-): Promise<number> => {
+): Promise<{
+  pushed: number;
+  pulled: number;
+  rejected: number;
+  hash: string | null;
+  exchanged: boolean;
+}> => {
   let pushed = 0;
+  let pulled = 0;
+  let rejected = 0;
+  let finalHash: string | null = null;
+  let exchanged = false;
+  const supportsExchange = capabilities.features?.push_pull_exchange === true;
+  const supportsAuthoritativeStatus = capabilities.features?.authoritative_status_fields === true;
   const batchLimit = capabilities.limits?.push_mutations
     ?? capabilities.limits?.max_mutations
     ?? 100;
@@ -309,7 +363,12 @@ export const pushOutbox = async (
         token,
         state.generationId ?? capabilities.generation_id,
         repository.profile.clientId,
-        claimedBatch.map(mutationFromOutbox),
+        claimedBatch.map(record => mutationFromOutbox(record, supportsAuthoritativeStatus)),
+        supportsExchange ? {
+          pullSince: state.cursor,
+          pullLimit: capabilities.limits?.pull_changes ?? capabilities.limits?.max_pull_limit,
+          entityTypes: ['product'],
+        } : undefined,
       );
       if (response.generation_id !== (state.generationId ?? capabilities.generation_id)) {
         throw new SyncProtocolError(
@@ -336,23 +395,11 @@ export const pushOutbox = async (
           continue;
         }
         if (result.status === 'conflict') {
-          const conflictFields = result.conflict?.fields;
-          const fields = Array.isArray(conflictFields)
-            ? conflictFields
-            : conflictFields && typeof conflictFields === 'object'
-              ? Object.keys(conflictFields)
-              : result.conflicting_fields ?? result.fields ?? [];
-          await repository.recordConflict(
-            record,
-            result.conflict?.server_revision === null
-              ? 0
-              : result.conflict?.server_revision
-              ?? result.revision
-              ?? result.record_revision
-              ?? record.baseRevision,
-            fields,
-            result.conflict?.server_data ?? result.data ?? result.record ?? null,
-          );
+          // V2.1 product patches are conflict-free. If an older server still
+          // rejects a mutation, server state wins automatically after the
+          // remaining outbox has drained and a verified snapshot is loaded.
+          await repository.discardMutation(record);
+          rejected++;
         } else {
           await repository.acknowledgeMutation(
             record,
@@ -368,6 +415,30 @@ export const pushOutbox = async (
           `Server bestätigte ${missingAcknowledgements.length} Mutation(en) nicht vollständig.`,
         );
       }
+      if (supportsExchange) {
+        if (
+          !Array.isArray(response.changes)
+          || !Number.isSafeInteger(response.next_cursor)
+          || typeof response.has_more !== 'boolean'
+          || !Number.isSafeInteger(response.min_available_revision)
+        ) {
+          throw new Error('Server kündigte V2.1-Exchange an, lieferte aber keine gültige Change-Seite.');
+        }
+        const applied = await applyPullPage(
+          repository,
+          response as V2PushData & V2PullData,
+          state.generationId ?? capabilities.generation_id,
+          state.cursor,
+        );
+        pulled += applied.pulled;
+        finalHash = applied.hash;
+        exchanged = true;
+        if (applied.hasMore) {
+          const remainder = await pullUntilCurrent(repository, baseUrl, token, capabilities);
+          pulled += remainder.pulled;
+          finalHash = remainder.hash;
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stillQueuedIds = new Set((await repository.getOutbox()).map(record => record.mutationId));
@@ -377,7 +448,7 @@ export const pushOutbox = async (
       throw error;
     }
   }
-  return pushed;
+  return { pushed, pulled, rejected, hash: finalHash, exchanged };
 };
 
 const runV2SyncUnlocked = async (
@@ -392,6 +463,7 @@ const runV2SyncUnlocked = async (
     await repository.updateSyncState({
       protocol: 'v1',
       capabilityCheckedAt: Date.now(),
+      capabilityClientVersion: CLIENT_VERSION,
       lastError: null,
     });
     return {
@@ -418,6 +490,7 @@ const runV2SyncUnlocked = async (
         throw new Error(`Unsupported server canonicalization: ${refreshed.canonicalization}`);
       }
       capabilities = refreshed;
+      await repository.discardAllLocalIntents();
     }
     const preRepairState = await repository.getSyncState();
     const snapshot = await loadSnapshot(
@@ -426,7 +499,7 @@ const runV2SyncUnlocked = async (
       token,
       undefined,
       capabilities.limits?.snapshot_records ?? capabilities.limits?.max_snapshot_limit,
-      error instanceof SyncProtocolError && error.code === 'generation_mismatch',
+      false,
       preRepairState.generationId ?? capabilities.generation_id,
     );
     warning = 'Der inkrementelle Sync-Zustand war veraltet und wurde durch einen neuen Snapshot repariert.';
@@ -440,6 +513,7 @@ const runV2SyncUnlocked = async (
   const generationChanged = state.generationId !== capabilities.generation_id;
   if (state.generationId && generationChanged) {
     warning = 'Der Server-Datensatz wurde ersetzt; der lokale Sync-Stand wurde aus einem neuen Snapshot aufgebaut.';
+    await repository.discardAllLocalIntents();
   }
   if (generationChanged || state.snapshotRequired || state.cursor < capabilities.min_available_revision) {
     try {
@@ -449,7 +523,7 @@ const runV2SyncUnlocked = async (
         token,
         generationChanged ? undefined : capabilities.generation_id,
         capabilities.limits?.snapshot_records ?? capabilities.limits?.max_snapshot_limit,
-        Boolean(state.generationId && generationChanged),
+        false,
         undefined,
         preserveLegacyBootstrapIntent,
       );
@@ -467,31 +541,68 @@ const runV2SyncUnlocked = async (
   // Only records still lacking a server shadow after bootstrap/snapshot are
   // genuine local-only intent. Queuing before the first snapshot would turn a
   // stale cloned cache into a base-revision-zero overwrite.
-  await repository.queueProductsWithoutShadow();
+  if (preserveLegacyBootstrapIntent) await repository.queueProductsWithoutShadow();
 
   let pulled = 0;
-  try {
-    const pullResult = await pullUntilCurrent(repository, baseUrl, token, capabilities);
-    pulled += pullResult.pulled;
-  } catch (error) {
-    await recoverWithSnapshot(error);
-  }
-
   let pushed = 0;
-  let finalPull: Awaited<ReturnType<typeof pullUntilCurrent>> | null = null;
+  let rejected = 0;
+  let finalHash: string | null = null;
+  let synchronized = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      pushed += await pushOutbox(repository, baseUrl, token, capabilities);
-      finalPull = await pullUntilCurrent(repository, baseUrl, token, capabilities);
+      const pushResult = await pushOutbox(repository, baseUrl, token, capabilities);
+      pushed += pushResult.pushed;
+      pulled += pushResult.pulled;
+      rejected += pushResult.rejected;
+      if (pushResult.rejected > 0) {
+        await repository.updateSyncState({ serverRepairRequired: true });
+      }
+      finalHash = pushResult.hash;
+      if (!pushResult.exchanged) {
+        const pullResult = await pullUntilCurrent(repository, baseUrl, token, capabilities);
+        pulled += pullResult.pulled;
+        finalHash = pullResult.hash;
+      }
+      synchronized = true;
       break;
     } catch (error) {
       if (attempt > 0 || !requiresSnapshot(error)) throw error;
       await recoverWithSnapshot(error);
     }
   }
-  if (!finalPull) throw new Error('V2 synchronization could not be completed.');
-  pulled += finalPull.pulled;
-  if (!await verifyShadowHash(repository, finalPull.hash)) {
+  if (!synchronized) throw new Error('V2 synchronization could not be completed.');
+  const repairState = await repository.getSyncState();
+  const openConflictCount = await repository.countConflicts();
+  if (openConflictCount > 0) {
+    // Conflicts created by pre-2.1 clients must not keep their related local
+    // intents blocked forever. Server state wins for those entities.
+    await repository.discardConflictedMutations();
+  }
+  const repairRequired = repairState.serverRepairRequired === true
+    || rejected > 0
+    || openConflictCount > 0;
+  if (repairRequired && (await repository.getOutbox()).length === 0) {
+    await repository.clearConflicts();
+    const currentState = await repository.getSyncState();
+    const repaired = await loadSnapshot(
+      repository,
+      baseUrl,
+      token,
+      currentState.generationId ?? capabilities.generation_id,
+      capabilities.limits?.snapshot_records ?? capabilities.limits?.max_snapshot_limit,
+    );
+    const catchUp = await pullUntilCurrent(repository, baseUrl, token, capabilities);
+    pulled += catchUp.pulled;
+    finalHash = catchUp.hash ?? repaired.datasetHash;
+    warning = [
+      warning,
+      rejected > 0
+        ? `${rejected} veraltete Änderung(en) wurden vom Server abgelehnt; der lokale Stand wurde automatisch aus einem vollständigen Server-Snapshot repariert.`
+        : 'Eine alte Konfliktmarkierung wurde automatisch durch den vollständigen Serverstand ersetzt.',
+    ].filter(Boolean).join(' ');
+    await repository.updateSyncState({ serverRepairRequired: false });
+  }
+  if (!await verifyShadowHash(repository, finalHash)) {
     // A single automatic repair attempt. Never accept a second mismatch silently.
     console.warn('V2 dataset hash mismatch; starting a full repair snapshot.');
     const currentState = await repository.getSyncState();
@@ -517,7 +628,9 @@ const runV2SyncUnlocked = async (
     generationId: state.generationId ?? capabilities.generation_id,
     serverInstanceId: capabilities.server_instance_id ?? null,
     minAvailableRevision: Math.max(state.minAvailableRevision, capabilities.min_available_revision),
+    capabilities,
     capabilityCheckedAt: Date.now(),
+    capabilityClientVersion: CLIENT_VERSION,
     lastSyncAt: Date.now(),
     lastError: null,
     snapshotRequired: false,
@@ -567,15 +680,61 @@ export const runWithProfileSyncLock = async <T,>(
   return runWithProcessLock();
 };
 
+const scheduleDailyIntegritySnapshot = async (
+  repository: ProductSyncRepository,
+  baseUrl: string,
+  token: string,
+  capabilities: V2Capabilities,
+): Promise<void> => {
+  if (typeof window === 'undefined' || integritySnapshotTimers.has(repository.profile.id)) return;
+  const state = await repository.getSyncState();
+  const oneDay = 24 * 60 * 60 * 1000;
+  if (Date.now() - Number(state.lastIntegritySnapshotAt || 0) < oneDay) return;
+  const timer = setTimeout(() => {
+    void runWithProfileSyncLock(repository.profile.id, async () => {
+      const currentState = await repository.getSyncState();
+      if (Date.now() - Number(currentState.lastIntegritySnapshotAt || 0) < oneDay) return;
+      if ((await repository.getOutbox()).length > 0) return;
+      const snapshot = await loadSnapshot(
+        repository,
+        baseUrl,
+        token,
+        currentState.generationId ?? capabilities.generation_id,
+        capabilities.limits?.snapshot_records ?? capabilities.limits?.max_snapshot_limit,
+      );
+      await pullUntilCurrent(repository, baseUrl, token, capabilities);
+      await repository.updateSyncState({
+        lastIntegritySnapshotAt: Date.now(),
+        datasetHash: snapshot.datasetHash,
+      });
+    }).catch(error => {
+      console.warn('Täglicher V2.1-Integritäts-Snapshot wurde verschoben:', error);
+    }).finally(() => {
+      integritySnapshotTimers.delete(repository.profile.id);
+    });
+  }, 10_000);
+  if (typeof (timer as { unref?: () => void }).unref === 'function') {
+    (timer as { unref: () => void }).unref();
+  }
+  integritySnapshotTimers.set(repository.profile.id, timer);
+};
+
 export const runV2Sync = async (
   repository: ProductSyncRepository,
   baseUrl: string,
   token: string,
   knownCapabilities?: V2Capabilities,
-): Promise<SyncRunResult> => runWithProfileSyncLock(
-  repository.profile.id,
-  () => runV2SyncUnlocked(repository, baseUrl, token, knownCapabilities),
-);
+): Promise<SyncRunResult> => {
+  const result = await runWithProfileSyncLock(
+    repository.profile.id,
+    () => runV2SyncUnlocked(repository, baseUrl, token, knownCapabilities),
+  );
+  if (result.protocol === 'v2') {
+    const capabilities = knownCapabilities ?? (await repository.getSyncState()).capabilities;
+    if (capabilities) void scheduleDailyIntegritySnapshot(repository, baseUrl, token, capabilities);
+  }
+  return result;
+};
 
 export const detectSyncProtocol = async (
   repository: ProductSyncRepository,
@@ -583,10 +742,22 @@ export const detectSyncProtocol = async (
   token: string,
 ): Promise<V2Capabilities | null> => {
   try {
+    const state = await repository.getSyncState();
+    if (
+      state.protocol === 'v2'
+      && state.capabilities?.protocol_version === 2
+      && state.capabilityClientVersion === CLIENT_VERSION
+      && state.capabilityCheckedAt != null
+      && Date.now() - state.capabilityCheckedAt < 24 * 60 * 60 * 1000
+    ) {
+      return state.capabilities;
+    }
     const capabilities = await detectV2Capabilities(baseUrl, token, CLIENT_VERSION);
     await repository.updateSyncState({
       protocol: capabilities ? 'v2' : 'v1',
+      capabilities,
       capabilityCheckedAt: Date.now(),
+      capabilityClientVersion: CLIENT_VERSION,
       minAvailableRevision: capabilities?.min_available_revision ?? 0,
       lastError: null,
     });

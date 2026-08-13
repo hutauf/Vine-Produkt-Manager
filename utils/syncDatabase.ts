@@ -230,6 +230,7 @@ const defaultSyncState = (profileId: string): SyncStateRecord => ({
   minAvailableRevision: 0,
   datasetHash: null,
   capabilityCheckedAt: null,
+  capabilityClientVersion: null,
   lastSyncAt: null,
   lastError: null,
   snapshotRequired: false,
@@ -747,6 +748,60 @@ export class ProductSyncRepository {
   async markOutboxError(record: OutboxRecord, message: string): Promise<void> {
     if (record.id == null) return;
     await syncDatabase.outbox.update(record.id, { state: 'sending', lastError: message });
+  }
+
+  async discardMutation(record: OutboxRecord): Promise<void> {
+    if (record.id == null) return;
+    await syncDatabase.transaction('rw', syncDatabase.outbox, async () => {
+      const durable = await syncDatabase.outbox.get(record.id as number);
+      if (durable?.mutationId === record.mutationId) {
+        await syncDatabase.outbox.delete(record.id as number);
+      }
+    });
+  }
+
+  async clearConflicts(): Promise<void> {
+    await syncDatabase.conflicts.where('profileId').equals(this.profile.id).delete();
+  }
+
+  async discardConflictedMutations(): Promise<number> {
+    return syncDatabase.transaction(
+      'rw',
+      [syncDatabase.outbox, syncDatabase.conflicts],
+      async () => {
+        const conflicts = (await syncDatabase.conflicts
+          .where('profileId')
+          .equals(this.profile.id)
+          .toArray())
+          .filter(conflict => conflict.resolvedAt == null);
+        if (conflicts.length === 0) return 0;
+        const conflictedEntities = new Set(conflicts.map(conflict => (
+          `${conflict.entityType}\u0000${conflict.entityId}`
+        )));
+        const outbox = await syncDatabase.outbox
+          .where('profileId')
+          .equals(this.profile.id)
+          .toArray();
+        const discarded = outbox.filter(record => conflictedEntities.has(
+          `${record.entityType}\u0000${record.entityId}`,
+        ));
+        await syncDatabase.outbox.bulkDelete(
+          discarded.flatMap(record => record.id == null ? [] : [record.id]),
+        );
+        return discarded.length;
+      },
+    );
+  }
+
+  async discardAllLocalIntents(): Promise<void> {
+    await syncDatabase.transaction(
+      'rw',
+      [syncDatabase.outbox, syncDatabase.conflicts],
+      async () => {
+        await syncDatabase.outbox.where('profileId').equals(this.profile.id).delete();
+        await syncDatabase.conflicts.where('profileId').equals(this.profile.id).delete();
+      },
+    );
   }
 
   async prepareV1Upload(asins: string[]): Promise<{

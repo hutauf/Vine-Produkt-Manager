@@ -400,34 +400,29 @@ const App: React.FC = () => {
     const operationEpoch = profileEpochRef.current;
 
     return runServerOperation(async () => {
-      setIsLoading(true);
       setFeedbackMessage(null);
-      try {
-        const result = await fetchMergedProductData(productsRef.current);
-        if (operationEpoch !== profileEpochRef.current) return productsRef.current;
-        if (result.success) {
-          setCanonicalProducts(result.products);
-          setFeedbackMessage({
-            text: `Produktdaten erfolgreich vom Server geladen und synchronisiert (${result.products.length} Produkte).${result.message ? ` ${result.message}` : ''}`,
-            type: result.message ? 'info' : 'success',
-          });
-        } else if (result.invalidToken) {
-          beginProductProfileTransition();
-          setApiToken(null);
-          setFeedbackMessage({
-            text: 'Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.',
-            type: 'error',
-          });
-        } else {
-          setFeedbackMessage({
-            text: `Fehler beim Laden der Produkte vom Server: ${result.message} Lokale Daten werden beibehalten.`,
-            type: 'error',
-          });
-        }
-        return result.products;
-      } finally {
-        setIsLoading(false);
+      const result = await fetchMergedProductData(productsRef.current);
+      if (operationEpoch !== profileEpochRef.current) return productsRef.current;
+      if (result.success) {
+        setCanonicalProducts(result.products);
+        setFeedbackMessage({
+          text: `Produktdaten erfolgreich im Hintergrund synchronisiert (${result.products.length} Produkte).${result.message ? ` ${result.message}` : ''}`,
+          type: result.message ? 'info' : 'success',
+        });
+      } else if (result.invalidToken) {
+        beginProductProfileTransition();
+        setApiToken(null);
+        setFeedbackMessage({
+          text: 'Ungültiger API Token. Serverdaten konnten nicht geladen werden. Lokale Daten bleiben.',
+          type: 'error',
+        });
+      } else {
+        setFeedbackMessage({
+          text: `Hintergrund-Sync fehlgeschlagen: ${result.message} Lokale Daten werden beibehalten.`,
+          type: 'error',
+        });
       }
+      return result.products;
     });
   }, [apiToken, beginProductProfileTransition, fetchMergedProductData, isProductStorageReady, runServerOperation, setCanonicalProducts]);
 
@@ -769,15 +764,10 @@ const App: React.FC = () => {
           return { success: false, message };
         }
 
-        const refreshed = await fetchMergedProductData(productsRef.current);
-        if (refreshed.success) {
-          setCanonicalProducts(refreshed.products);
-        }
+        if (response.data) setCanonicalProducts(response.data);
         setFeedbackMessage({
-          text: refreshed.success
-            ? `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert.`
-            : `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert; anschließendes Neuladen fehlgeschlagen.`,
-          type: refreshed.success ? 'success' : 'info',
+          text: `Produkt ${productWithTimestamp.ASIN} auf Server aktualisiert.`,
+          type: 'success',
         });
         return { success: true };
       });

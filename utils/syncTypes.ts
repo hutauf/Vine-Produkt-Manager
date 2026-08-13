@@ -78,9 +78,13 @@ export interface SyncStateRecord {
   minAvailableRevision: number;
   datasetHash: string | null;
   capabilityCheckedAt: number | null;
+  capabilityClientVersion?: string | null;
   lastSyncAt: number | null;
   lastError: string | null;
   snapshotRequired: boolean;
+  capabilities?: V2Capabilities | null;
+  lastIntegritySnapshotAt?: number | null;
+  serverRepairRequired?: boolean;
 }
 
 export interface V2Capabilities {
@@ -102,6 +106,14 @@ export interface V2Capabilities {
     max_snapshot_limit?: number;
   };
   dataset_hash?: string;
+  features?: {
+    push_pull_exchange?: boolean;
+    on_demand_pull_hash?: boolean;
+    authoritative_status_fields?: boolean;
+    product_last_write_wins?: boolean;
+    product_intent_age_lww?: boolean;
+    product_delete_supported?: boolean;
+  };
 }
 
 export interface V2Mutation {
@@ -111,8 +123,10 @@ export interface V2Mutation {
   entity_id: string;
   base_revision: number;
   operation: 'patch' | 'delete';
+  intent_age_ms?: number;
   set?: JsonObject;
   unset?: string[];
+  authoritative_fields?: string[];
 }
 
 export interface V2MutationResult {
@@ -137,6 +151,10 @@ export interface V2PushData {
   current_revision: number;
   results: V2MutationResult[];
   dataset_hash?: string | null;
+  changes?: V2Change[];
+  next_cursor?: number;
+  min_available_revision?: number;
+  has_more?: boolean;
 }
 
 export interface V2Change {

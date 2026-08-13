@@ -34,7 +34,7 @@ export interface ProductApiValue {
   myTeilwert?: number | null;
   myteilwert?: number | null;
   myTeilwertReason?: string;
-  usageStatus: ProductUsage[]; // Multiple statuses possible
+  usageStatus: ProductUsage[]; // One main status plus optional "defekt"
   verkauft?: boolean;
   lager?: boolean;
   entsorgt?: boolean;
@@ -429,7 +429,7 @@ export const apiUpdateProducts = async (
   token: string,
   productsToUpdate: Product[],
   baseProducts: Array<Product | undefined> = [],
-): Promise<ApiResponse<null>> => {
+): Promise<ApiResponse<Product[]>> => {
   if (productsToUpdate.length === 0) {
     return { status: 'success', message: 'No products to update.', inserted:0, updated:0, skipped:0 };
   }
@@ -459,6 +459,7 @@ export const apiUpdateProducts = async (
         skipped: targetConflicts.size,
         syncProtocol: 'v2',
         conflicts: result.conflicts,
+        data: result.products,
       };
     }
   } catch (error) {
@@ -485,7 +486,7 @@ export const apiUpdateProducts = async (
         skipped: blockedByConflict,
         syncProtocol: 'v1',
         conflicts: await repository.countConflicts(),
-      } as ApiResponse<null>;
+      } as ApiResponse<Product[]>;
     }
     const payload = productsForV1.map(p => ({
       ASIN: p.ASIN,
@@ -493,7 +494,7 @@ export const apiUpdateProducts = async (
       value: JSON.stringify(productToApiValue(p)),
     }));
     const body = { token, request: "update_asin", payload };
-    const response = await fetchApiPost<null>(baseUrl, body);
+    const response = await fetchApiPost<Product[]>(baseUrl, body);
     if (response.status === 'success') {
       const serverSkipped = response.skipped ?? 0;
       if (serverSkipped === 0) {
@@ -534,7 +535,7 @@ export const apiUpdateSingleProduct = async (
   token: string,
   productToUpdate: Product,
   baseProduct?: Product,
-): Promise<ApiResponse<null>> => {
+): Promise<ApiResponse<Product[]>> => {
   return apiUpdateProducts(baseUrl, token, [productToUpdate], baseProduct ? [baseProduct] : []);
 };
 

@@ -305,7 +305,7 @@ test('large independent outboxes use bounded batches instead of one HTTP request
       'token',
       {
         protocol_version: 2,
-        sync_core_version: '2.0.0',
+        sync_core_version: '2.1.0',
         canonicalization: 'jcs-rfc8785-v1',
         generation_id: 'large-generation',
         current_revision: 0,
@@ -314,7 +314,7 @@ test('large independent outboxes use bounded batches instead of one HTTP request
         limits: { push_mutations: 100 },
       },
     );
-    assert.equal(pushed, total);
+    assert.equal(pushed.pushed, total);
     assert.deepEqual(batchSizes, [100, 100, 5]);
     assert.equal((await repository.getOutbox()).length, 0);
     assert.equal((await repository.getProducts()).length, total);
@@ -419,7 +419,7 @@ test('an incremental remote delete quarantines a pending edit without truncating
   assert.deepEqual(visible.unknownField, { retained: true });
 });
 
-test('a push conflict against a deleted server record rebases a complete local restore on revision zero', async () => {
+test('a rejected product mutation is discarded instead of creating an unresolved conflict', async () => {
   const originalFetch = global.fetch;
   const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
   const serverData = {
@@ -458,22 +458,16 @@ test('a push conflict against a deleted server record rebases a complete local r
     });
   };
   try {
-    assert.equal(await syncEngine.pushOutbox(
+    const result = await syncEngine.pushOutbox(
       repository,
       'https://example.test/data_operations',
       'token',
       capabilities,
-    ), 0);
-    const [conflict] = await repository.listConflicts();
-    assert.equal(conflict.serverRecordRevision, 0);
-    assert.equal(conflict.serverRecord, null);
-    assert.equal(conflict.localSet.name, 'Local restore intent');
-    assert.equal(conflict.localSet.ordernumber, 'RESTORE-1');
-    assert.deepEqual(conflict.localSet.unknownField, { retained: true });
-    await repository.resolveConflict(conflict.id, 'local');
-    const [restore] = await repository.getOutbox();
-    assert.equal(restore.baseRevision, 0);
-    assert.equal(restore.set.ordernumber, 'RESTORE-1');
+    );
+    assert.equal(result.pushed, 0);
+    assert.equal(result.rejected, 1);
+    assert.equal((await repository.listConflicts()).length, 0);
+    assert.equal((await repository.getOutbox()).length, 0);
   } finally {
     global.fetch = originalFetch;
   }
@@ -1233,7 +1227,7 @@ test('an expired multi-page snapshot is restarted once with a fresh session', as
   }
 });
 
-test('a snapshot retry that crosses generations quarantines the old pending outbox', async () => {
+test('a snapshot retry that crosses generations replaces old local intent with server state', async () => {
   const originalFetch = global.fetch;
   const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
   const oldData = { name: 'Old server value', stable: true };
@@ -1329,24 +1323,13 @@ test('a snapshot retry that crosses generations quarantines the old pending outb
     assert.equal(snapshotCalls, 3);
     assert.equal((await repository.getSyncState()).generationId, 'generation-new');
     assert.equal((await repository.getOutbox()).length, 0);
-    const conflicts = await repository.listConflicts();
-    assert.equal(conflicts.length, 2);
-    const retainedConflict = conflicts.find(conflict => conflict.entityId === 'B012345678');
-    assert.equal(retainedConflict.localSet.name, 'Unsynced old-generation edit');
-    assert.equal(retainedConflict.serverRecord.name, 'New generation value');
-    const removedConflict = conflicts.find(conflict => conflict.entityId === 'B087654321');
-    assert.equal(removedConflict.localSet.name, 'Unsynced edit on removed product');
-    assert.equal(removedConflict.localSet.ordernumber, 'OLD-2');
-    assert.deepEqual(removedConflict.localSet.unknownField, { must: 'survive quarantine' });
-    assert.equal(removedConflict.serverRecord, null);
+    assert.equal((await repository.listConflicts()).length, 0);
     const products = await repository.getProducts();
     assert.equal(
       products.find(product => product.ASIN === 'B012345678').name,
-      'Unsynced old-generation edit',
+      'New generation value',
     );
-    const removedVisible = products.find(product => product.ASIN === 'B087654321');
-    assert.equal(removedVisible.ordernumber, 'OLD-2');
-    assert.deepEqual(removedVisible.unknownField, { must: 'survive quarantine' });
+    assert.equal(products.some(product => product.ASIN === 'B087654321'), false);
   } finally {
     global.fetch = originalFetch;
   }
@@ -1534,6 +1517,7 @@ test('generation mismatch refreshes capabilities and replaces state from a new s
     data: newData,
   }]);
   let capabilityCalls = 0;
+  let oldPushes = 0;
   let oldPulls = 0;
   global.fetch = async (_url, options) => {
     const body = JSON.parse(options.body);
@@ -1555,6 +1539,15 @@ test('generation mismatch refreshes capabilities and replaces state from a new s
     }
     if (body.request === 'sync_v2_pull' && body.payload.generation_id === 'generation-old') {
       oldPulls += 1;
+      return jsonResponse({
+        status: 'error',
+        code: 'generation_mismatch',
+        message: 'Generation changed.',
+        snapshot_required: true,
+      }, 409);
+    }
+    if (body.request === 'sync_v2_push' && body.payload.generation_id === 'generation-old') {
+      oldPushes += 1;
       return jsonResponse({
         status: 'error',
         code: 'generation_mismatch',
@@ -1597,17 +1590,16 @@ test('generation mismatch refreshes capabilities and replaces state from a new s
   };
   try {
     const result = await apiService.apiGetAllProducts('https://example.test/data_operations', 'token');
-    assert.equal(result.status, 'success');
+    assert.equal(result.status, 'success', result.message);
     assert.equal(result.data[0].restored, true);
     assert.match(result.message, /Snapshot/);
     assert.equal(capabilityCalls, 2);
-    assert.equal(oldPulls, 1);
+    assert.equal(oldPushes, 1);
+    assert.equal(oldPulls, 0);
     assert.equal((await repository.getSyncState()).generationId, 'generation-new');
     assert.equal((await repository.getOutbox()).length, 0);
-    const [quarantined] = await repository.listConflicts();
-    assert.equal(quarantined.localSet.name, 'Unsynced edit from old generation');
-    assert.equal(quarantined.serverRecordRevision, 4);
-    assert.equal(quarantined.serverRecord.restored, true);
+    assert.equal((await repository.listConflicts()).length, 0);
+    assert.equal((await repository.getProducts())[0].name, 'New generation');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1798,8 +1790,6 @@ test('an edit made during an in-flight push becomes a separate mutation rebased 
   const firstPushStarted = new Promise(resolve => { notifyFirstPush = resolve; });
   let releaseFirstPush;
   const firstPushGate = new Promise(resolve => { releaseFirstPush = resolve; });
-  let notifySecondCapability;
-  const secondCapabilitySeen = new Promise(resolve => { notifySecondCapability = resolve; });
   let capabilityCalls = 0;
   const pushedMutations = [];
   const currentHash = () => canonical.calculateDatasetHash([{
@@ -1810,7 +1800,6 @@ test('an edit made during an in-flight push becomes a separate mutation rebased 
     const body = JSON.parse(options.body);
     if (body.request === 'get_capabilities_v2') {
       capabilityCalls += 1;
-      if (capabilityCalls === 2) notifySecondCapability();
       return jsonResponse({
         status: 'success', protocol_version: 2, sync_core_version: '2.0.0',
         canonicalization: 'jcs-rfc8785-v1', generation_id: generationId,
@@ -1854,7 +1843,10 @@ test('an edit made during an in-flight push becomes a separate mutation rebased 
     const secondSave = apiService.apiUpdateSingleProduct(
       'https://example.test/data_operations', 'token', { ...product, name: 'Second edit' },
     );
-    await secondCapabilitySeen;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if ((await repository.getOutbox()).length === 2) break;
+      await new Promise(resolve => setImmediate(resolve));
+    }
     const inFlightOutbox = await repository.getOutbox();
     assert.equal(inFlightOutbox.length, 2);
     assert.equal(inFlightOutbox[0].state, 'sending');
@@ -1872,6 +1864,7 @@ test('an edit made during an in-flight push becomes a separate mutation rebased 
     assert.equal(pushedMutations[0].set.name, 'First edit');
     assert.equal(pushedMutations[1].base_revision, 2);
     assert.deepEqual(pushedMutations[1].set, { name: 'Second edit' });
+    assert.equal(capabilityCalls, 1);
     assert.equal(backendData.name, 'Second edit');
     assert.equal(backendData.unknown, 'preserved');
     assert.equal((await repository.getOutbox()).length, 0);
@@ -1943,7 +1936,7 @@ test('a dataset hash mismatch performs one full repair snapshot and informs the 
   }
 });
 
-test('V2 snapshot, incremental push, hash check and conflict storage use the agreed wire contract', async () => {
+test('V2 snapshot, one-request updates and automatic server-win repair use the agreed wire contract', async () => {
   const originalFetch = global.fetch;
   const requests = [];
   const generationId = 'generation-1';
@@ -1974,14 +1967,14 @@ test('V2 snapshot, incremental push, hash check and conflict storage use the agr
       payload = {
         status: 'success',
         protocol_version: 2,
-        sync_core_version: '2.0.0',
+        sync_core_version: '2.1.0',
         canonicalization: 'jcs-rfc8785-v1',
         generation_id: generationId,
         current_revision: revision,
         min_available_revision: 0,
         entity_types: ['product'],
         limits: { push_mutations: 100, pull_changes: 100, snapshot_records: 100 },
-        dataset_hash: await currentHash(),
+        features: { push_pull_exchange: true, authoritative_status_fields: true },
       };
     } else if (body.request === 'sync_v2_snapshot') {
       payload = {
@@ -2033,6 +2026,11 @@ test('V2 snapshot, incremental push, hash check and conflict storage use the agr
               server_data: backendData,
             },
           }],
+          changes: [],
+          next_cursor: revision,
+          min_available_revision: 0,
+          has_more: false,
+          dataset_hash: null,
         };
       } else {
         backendData = database.applyPatch(backendData, mutation.set || {}, mutation.unset || []);
@@ -2047,6 +2045,19 @@ test('V2 snapshot, incremental push, hash check and conflict storage use the agr
             revision,
             data: backendData,
           }],
+          changes: [{
+            revision,
+            entity_type: 'product',
+            entity_id: mutation.entity_id,
+            operation: 'upsert',
+            set: mutation.set || {},
+            unset: mutation.unset || [],
+            data: backendData,
+          }],
+          next_cursor: revision,
+          min_available_revision: 0,
+          has_more: false,
+          dataset_hash: null,
         };
       }
     } else {
@@ -2062,12 +2073,17 @@ test('V2 snapshot, incremental push, hash check and conflict storage use the agr
     assert.deepEqual(loaded.data[0].unknownServerField, { retained: true });
 
     const update = { ...loaded.data[0], name: 'Locally changed' };
+    const requestsBeforeUpdate = requests.length;
     const updateResponse = await apiService.apiUpdateSingleProduct(
       'https://example.test/data_operations',
       'token',
       update,
     );
     assert.equal(updateResponse.status, 'success');
+    assert.deepEqual(
+      requests.slice(requestsBeforeUpdate).map(request => request.request),
+      ['sync_v2_push'],
+    );
     const firstPush = requests.find(request => request.request === 'sync_v2_push');
     assert.ok(
       requests.findIndex(request => request.request === 'sync_v2_snapshot')
@@ -2076,24 +2092,41 @@ test('V2 snapshot, incremental push, hash check and conflict storage use the agr
     );
     assert.equal(firstPush.payload.mutations[0].base_revision, 5);
     assert.deepEqual(firstPush.payload.mutations[0].set, { name: 'Locally changed' });
+    assert.equal(Number.isSafeInteger(firstPush.payload.mutations[0].intent_age_ms), true);
+    assert.equal(firstPush.payload.mutations[0].intent_age_ms >= 0, true);
+    assert.equal(firstPush.payload.pull_since, 5);
     assert.equal(backendData.unknownServerField.retained, true);
+
+    const requestsBeforeStatusUpdate = requests.length;
+    const statusResponse = await apiService.apiUpdateSingleProduct(
+      'https://example.test/data_operations',
+      'token',
+      { ...updateResponse.data[0], usageStatus: ['verkauft'] },
+    );
+    assert.equal(statusResponse.status, 'success');
+    assert.deepEqual(
+      requests.slice(requestsBeforeStatusUpdate).map(request => request.request),
+      ['sync_v2_push'],
+    );
+    const statusPush = requests[requestsBeforeStatusUpdate];
+    assert.ok(statusPush.payload.mutations[0].authoritative_fields.includes('usageStatus'));
+    assert.ok(statusPush.payload.mutations[0].authoritative_fields.includes('verkauft'));
 
     conflictNextPush = true;
     const conflictResponse = await apiService.apiUpdateSingleProduct(
       'https://example.test/data_operations',
       'token',
-      { ...update, salePrice: 99 },
+      { ...statusResponse.data[0], salePrice: 99 },
     );
     assert.equal(conflictResponse.status, 'success');
-    assert.equal(conflictResponse.conflicts, 1);
+    assert.equal(conflictResponse.conflicts, 0);
     const repository = await database.openProductRepository('https://example.test/data_operations', 'token');
-    assert.equal(await repository.countConflicts(), 1);
-    const storedConflict = await database.syncDatabase.conflicts
-      .where('profileId')
-      .equals(repository.profile.id)
-      .first();
-    assert.deepEqual(storedConflict.fields, ['salePrice']);
-    assert.equal((await repository.getProducts())[0].salePrice, 99);
+    assert.equal(await repository.countConflicts(), 0);
+    assert.equal((await repository.getProducts())[0].salePrice, null);
+    assert.deepEqual(
+      requests.slice(-3).map(request => request.request),
+      ['sync_v2_push', 'sync_v2_snapshot', 'sync_v2_pull'],
+    );
   } finally {
     global.fetch = originalFetch;
   }

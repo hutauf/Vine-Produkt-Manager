@@ -106,6 +106,11 @@ export const pushV2Mutations = async (
   generationId: string,
   clientId: string,
   mutations: V2Mutation[],
+  exchange?: {
+    pullSince: number;
+    pullLimit?: number;
+    entityTypes?: Array<'product' | 'storage_location' | 'procedure_doc'>;
+  },
 ): Promise<V2PushData> => operationRequest<V2PushData>(baseUrl, {
   token,
   request: 'sync_v2_push',
@@ -113,6 +118,11 @@ export const pushV2Mutations = async (
     generation_id: generationId,
     client_id: clientId,
     mutations,
+    ...(exchange ? {
+      pull_since: exchange.pullSince,
+      ...(exchange.pullLimit != null ? { pull_limit: exchange.pullLimit } : {}),
+      ...(exchange.entityTypes ? { entity_types: exchange.entityTypes } : {}),
+    } : {}),
   },
 });
 
@@ -122,6 +132,7 @@ export const pullV2Changes = async (
   generationId: string,
   cursor: number,
   limit?: number,
+  includeHash = false,
 ): Promise<V2PullData> => operationRequest<V2PullData>(baseUrl, {
   token,
   request: 'sync_v2_pull',
@@ -129,6 +140,8 @@ export const pullV2Changes = async (
     generation_id: generationId,
     cursor,
     ...(limit != null ? { limit } : {}),
+    entity_types: ['product'],
+    ...(includeHash ? { include_hash: true } : {}),
   },
 });
 
