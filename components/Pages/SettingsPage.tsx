@@ -8,6 +8,11 @@ import { EuerSettings } from '../../types'; // Import EuerSettings
 import { convertISOToGerman, convertGermanToISO, getTodayGermanFormat } from '../../utils/dateUtils'; // For date input
 import { DEFAULT_API_BASE_URL } from '../../constants';
 import { ConflictRecord } from '../../utils/syncTypes';
+import {
+  APP_BUILD_COMMIT,
+  APP_BUILD_TIME_LABEL,
+  APP_VERSION,
+} from '../../utils/appVersion';
 
 
 interface SettingsPageProps {
@@ -375,6 +380,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
         </div>
       </div>
+
+      <footer
+        className="pt-5 border-t border-slate-700 text-center text-xs text-gray-500"
+        aria-label="Anwendungsversion"
+      >
+        Vine Produkt Manager v{APP_VERSION} · Build {APP_BUILD_COMMIT} · {APP_BUILD_TIME_LABEL}
+      </footer>
 
       {/* Modals */}
       {showDeleteConfirmModal && (
